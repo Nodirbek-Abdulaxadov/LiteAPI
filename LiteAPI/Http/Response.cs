@@ -10,7 +10,16 @@ public class Response
     public byte[] Body { get; set; } = [];
 
     private static byte[] Encode(string text) => Encoding.UTF8.GetBytes(text);
-    private static byte[] EncodeJson(object obj) => Encoding.UTF8.GetBytes(JsonSerializer.Serialize(obj));
+    private static byte[] EncodeJson(object obj)
+    {
+        JsonSerializerOptions options = new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            WriteIndented = true
+        };
+
+        return Encoding.UTF8.GetBytes(JsonSerializer.Serialize(obj, options));
+    }
 
     public static Response Ok(string text) => new()
     {
