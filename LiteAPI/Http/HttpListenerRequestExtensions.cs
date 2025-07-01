@@ -46,38 +46,76 @@ public static class HttpListenerRequestExtensions
         return new LiteHttpContext(request, routeParams ?? []);
     }
 
-    public static T GetValue<T>(this LiteHttpContext ctx, string paramName)
+    public static T GetFromQuery<T>(this HttpListenerRequest request)
     {
-        if (!ctx.Params.TryGetValue(paramName, out var value))
-            throw new InvalidOperationException($"Route parameter '{paramName}' not found.");
+        var obj = Activator.CreateInstance<T>()!;
+        var props = typeof(T).GetProperties();
 
-        try
+        var query = System.Web.HttpUtility.ParseQueryString(request.Url!.Query);
+
+        foreach (var prop in props)
         {
-            if (typeof(T) == typeof(string))
-                return (T)(object)value;
-
-            if (typeof(T) == typeof(int) && int.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var intValue))
-                return (T)(object)intValue;
-
-            if (typeof(T) == typeof(long) && long.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var longValue))
-                return (T)(object)longValue;
-
-            if (typeof(T) == typeof(Guid) && Guid.TryParse(value, out var guidValue))
-                return (T)(object)guidValue;
-
-            if (typeof(T) == typeof(bool) && bool.TryParse(value, out var boolValue))
-                return (T)(object)boolValue;
-
-            if (typeof(T) == typeof(double) && double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var doubleValue))
-                return (T)(object)doubleValue;
-
-            // Extend for other primitives as needed
-
-            throw new InvalidCastException($"Cannot convert '{value}' to type {typeof(T).Name}.");
+            var value = query.Get(prop.Name);
+            if (value != null)
+            {
+                var converted = Convert.ChangeType(value, prop.PropertyType, CultureInfo.InvariantCulture);
+                prop.SetValue(obj, converted);
+            }
         }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException($"Error parsing parameter '{paramName}': {ex.Message}");
-        }
+
+        return obj;
     }
+
+    public static T GetFromRoute<T>(this LiteHttpContext ctx)
+    {
+        var obj = Activator.CreateInstance<T>()!;
+        var props = typeof(T).GetProperties();
+
+        foreach (var prop in props)
+        {
+            if (ctx.Params.TryGetValue(prop.Name, out var value))
+            {
+                var converted = Convert.ChangeType(value, prop.PropertyType, CultureInfo.InvariantCulture);
+                prop.SetValue(obj, converted);
+            }
+        }
+
+        return obj;
+    }
+
+    public static T GetFromBody<T>(this HttpListenerRequest request)
+    {
+        using var reader = new StreamReader(request.InputStream);
+        var body = reader.ReadToEnd();
+        JsonSerializerOptions options = new()
+        {
+            PropertyNameCaseInsensitive = true,
+            WriteIndented = true
+        };
+        return JsonSerializer.Deserialize<T>(body, options)!;
+    }
+
+    public static T GetFromForm<T>(this HttpListenerRequest request)
+    {
+        using var reader = new StreamReader(request.InputStream);
+        var body = reader.ReadToEnd();
+        var parsed = System.Web.HttpUtility.ParseQueryString(body);
+
+        var obj = Activator.CreateInstance<T>()!;
+        var props = typeof(T).GetProperties();
+
+        foreach (var prop in props)
+        {
+            var value = parsed.Get(prop.Name);
+            if (value != null)
+            {
+                var converted = Convert.ChangeType(value, prop.PropertyType, CultureInfo.InvariantCulture);
+                prop.SetValue(obj, converted);
+            }
+        }
+
+        return obj;
+    }
+
+
 }

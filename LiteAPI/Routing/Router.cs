@@ -26,6 +26,7 @@ public class Router
         string method = request.HttpMethod.ToUpperInvariant();
         string path = request.Url!.AbsolutePath;
 
+        // 1️⃣ Exact match
         if (routes.TryGetValue((method, path), out var handler))
         {
             try
@@ -38,6 +39,20 @@ public class Router
             }
         }
 
+        // 2️⃣ Check for "/{*path}" wildcard fallback match
+        if (routes.TryGetValue((method, "/{*path}"), out var wildcardHandler))
+        {
+            try
+            {
+                return wildcardHandler(request);
+            }
+            catch (Exception ex)
+            {
+                return Response.BadRequest(ex.Message);
+            }
+        }
+
+        // 3️⃣ Not Found fallback
         return new Response
         {
             StatusCode = 404,
