@@ -2,6 +2,9 @@
 
 namespace LiteAPI;
 
+/// <summary>
+/// LiteWebApplication: signature-based routing with delegate support.
+/// </summary>
 public class LiteWebApplication(Router router, ServiceCollection services, string[] urls)
 {
     private readonly HttpListener _listener = new();
@@ -11,6 +14,14 @@ public class LiteWebApplication(Router router, ServiceCollection services, strin
     public Router Router => router;
     public ServiceCollection Services => services;
 
+    // 🟩 YANGILANDI: RequestHandler o‘rniga Delegate ishlatadi
+    public void Get(string path, Delegate handler) => router.Get(path, handler);
+    public void Post(string path, Delegate handler) => router.Post(path, handler);
+    public void Put(string path, Delegate handler) => router.Put(path, handler);
+    public void Delete(string path, Delegate handler) => router.Delete(path, handler);
+    public void Patch(string path, Delegate handler) => router.Patch(path, handler);
+    public void Options(string path, Delegate handler) => router.Options(path, handler);
+    public void Head(string path, Delegate handler) => router.Head(path, handler);
     public void Get(string path, RequestHandler handler) => router.Get(path, handler);
     public void Post(string path, RequestHandler handler) => router.Post(path, handler);
     public void Put(string path, RequestHandler handler) => router.Put(path, handler);
@@ -32,11 +43,11 @@ public class LiteWebApplication(Router router, ServiceCollection services, strin
             var context = _listener.GetContext();
             context.Request.SetServices(services);
 
-            _ = Task.Run(() =>
+            _ = Task.Run(async () =>
             {
                 try
                 {
-                    var response = router.Route(context.Request);
+                    var response = await router.RouteAsync(context.Request);
                     context.Response.StatusCode = response.StatusCode;
                     context.Response.ContentType = response.ContentType;
                     context.Response.ContentLength64 = response.Body.Length;

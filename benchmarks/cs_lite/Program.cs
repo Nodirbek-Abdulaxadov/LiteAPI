@@ -1,52 +1,50 @@
 ﻿using LiteAPI;
+using System.Net;
 
 var builder = LiteWebApplication.CreateBuilder(args);
 var app = builder.Build();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+List<UserDto> users =
+[
+    new UserDto { Id = 1, Name = "Alice1", Email = "test1@gmail.com", Age = 31 },
+    new UserDto { Id = 2, Name = "Alice2", Email = "test2@gmail.com", Age = 32 },
+    new UserDto { Id = 3, Name = "Alice3", Email = "test3@gmail.com", Age = 33 },
+];
 
-app.Get("/weatherforecast", request =>
+app.Get("/api/users", (HttpListenerRequest req, [FromQuery] QueryParams query) =>
 {
-    var forecast = Enumerable.Range(1, 500).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return Response.OkJson(forecast);
+    return Response.OkJson(users);
 });
 
-app.Get("/api/users", request =>
+app.Get("/api/users/{id}", (HttpListenerRequest req, [FromRoute] int id) =>
 {
-    var query = request.GetFromQuery<QueryParams>();
-    return Response.OkJson(new { query.Page, query.PageSize, query.Search });
-});
-
-app.Post("/api/users", request =>
-{
-    var user = request.GetFromBody<UserDto>();
+    var user = users.FirstOrDefault(u => u.Id == id);
+    if (user == null)
+        return Response.NotFound($"User with ID {id} not found.");
     return Response.OkJson(user);
 });
 
-app.Post("/api/users/form", request =>
+app.Post("/api/users", (HttpListenerRequest req, [FromForm] UserDto newUser) =>
 {
-    var user = request.GetFromForm<UserDto>();
-    return Response.OkJson(user);
+    if (newUser == null || string.IsNullOrWhiteSpace(newUser.Name) || string.IsNullOrWhiteSpace(newUser.Email))
+        return Response.BadRequest("Invalid user data.");
+    newUser.Id = users.Max(u => u.Id) + 1;
+    users.Add(newUser);
+    return Response.Created($"/api/users/{newUser.Id}", newUser);
 });
 
+app.Put("/api/users/{id}", (HttpListenerRequest req, int id, UserDto updatedUser) =>
+{
+    var user = users.FirstOrDefault(u => u.Id == id);
+    if (user == null)
+        return Response.NotFound($"User with ID {id} not found.");
+    user.Name = updatedUser.Name;
+    user.Email = updatedUser.Email;
+    user.Age = updatedUser.Age;
+    return Response.OkJson(user);
+});
 
 app.Run();
-
-internal record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
-
 
 internal class QueryParams
     {
@@ -54,12 +52,12 @@ internal class QueryParams
     public int PageSize { get; set; } = 10;
     public string? Search { get; set; }
 }
-
 internal class UserDto
 {
-    public override string ToString() => $"{Name} ({Email}), Age: {Age}";
-
+    public int Id { get; set; } = 0;
     public string Name { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public int Age { get; set; } = 0;
+    public override string ToString() => $"{Name} ({Email}), Age: {Age}";
+
 }
