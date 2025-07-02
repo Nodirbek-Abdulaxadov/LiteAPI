@@ -1,4 +1,6 @@
-﻿namespace LiteAPI;
+﻿using LiteAPI.Routing.Grouping;
+
+namespace LiteAPI;
 
 /// <summary>
 /// Extension methods for LiteWebApplication, including route grouping and static file serving.
@@ -12,6 +14,13 @@ public static class LiteWebApplicationExtensions
     {
         var group = new LiteWebApplicationGroup(app.Router, prefix);
         configure(group);
+    }
+
+    public static void MapGroup<TGroup>(this LiteWebApplication app, string prefix)
+        where TGroup : ILiteGroup, new()
+    {
+        var group = new LiteWebApplicationGroup(app.Router, prefix);
+        new TGroup().Register(group);
     }
 
     /// <summary>
