@@ -1,9 +1,19 @@
-﻿using LiteAPI;
+﻿using lite;
+using LiteAPI;
+using LiteAPI.Configurations;
 
 var builder = LiteWebApplication.CreateBuilder(args);
+builder.Configure<Configurations>();
+
 var app = builder.Build();
 
 app.MapGroup<UsersRoutes>("/api/users");
+app.Get("/config", request =>
+{
+    var config = request.GetService<LiteConfiguration>();
+    return Response.OkJson(config);
+});
+
 
 app.Run();
 

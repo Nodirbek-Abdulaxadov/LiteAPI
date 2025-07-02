@@ -13,7 +13,7 @@ public class UsersRoutes : ILiteGroup
 
     public void Register(LiteWebApplicationGroup users)
     {
-        users.Get("", (HttpListenerRequest req, [FromQuery] QueryParams query) =>
+        users.Get("/", (HttpListenerRequest req, [FromQuery] QueryParams query) =>
         {
             return Response.OkJson(users);
         });
@@ -26,7 +26,7 @@ public class UsersRoutes : ILiteGroup
             return Response.OkJson(user);
         });
 
-        users.Post("", (HttpListenerRequest req, [FromForm] UserDto newUser) =>
+        users.Post("/", (HttpListenerRequest req, [FromForm] UserDto newUser) =>
         {
             if (newUser == null || string.IsNullOrWhiteSpace(newUser.Name) || string.IsNullOrWhiteSpace(newUser.Email))
                 return Response.BadRequest("Invalid user data.");

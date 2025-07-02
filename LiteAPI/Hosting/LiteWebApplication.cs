@@ -33,7 +33,10 @@ public class LiteWebApplication(Router router, ServiceCollection services, strin
     public void Run()
     {
         foreach (var url in urls)
-            _listener.Prefixes.Add(url);
+        {
+            var fixedUrl = url.EndsWith('/') ? url : url + "/";
+            _listener.Prefixes.Add(fixedUrl);
+        }
 
         _listener.Start();
         Console.WriteLine($"LiteAPI running on: {string.Join(", ", urls)}");

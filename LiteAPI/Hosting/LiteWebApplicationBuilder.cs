@@ -1,10 +1,31 @@
-﻿namespace LiteAPI;
+﻿using LiteAPI.Configurations;
+
+namespace LiteAPI;
 
 public class LiteWebApplicationBuilder
 {
     public Router Router { get; } = new();
     public ServiceCollection Services { get; } = new();
-    public string[] Urls { get; set; } = ["http://localhost:8080/"];
+    public LiteConfiguration LiteConfiguration { get; internal set; } = new();
 
-    public LiteWebApplication Build() => new(Router, Services, Urls);
+    public LiteWebApplicationBuilder()
+    {
+        Services.AddSingleton(LiteConfiguration);
+    }
+
+    public LiteWebApplicationBuilder Configure(Action<LiteConfiguration> configure)
+    {
+        configure(LiteConfiguration);
+        return this;
+    }
+
+    public LiteWebApplication Build()
+    {
+        LiteConfiguration.Initialize();
+        LiteConfiguration.LaunchBrowserIfEnabled();
+        // Ensure the correct instance is injected:
+        Services.AddSingleton(LiteConfiguration);
+
+        return new LiteWebApplication(Router, Services, LiteConfiguration.Urls);
+    }
 }
