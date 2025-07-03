@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using LiteAPI.Middlewares;
+using System.Net;
 
 namespace LiteAPI;
 
@@ -8,13 +9,14 @@ namespace LiteAPI;
 public class LiteWebApplication(Router router, ServiceCollection services, string[] urls)
 {
     private readonly HttpListener _listener = new();
+    private readonly List<LiteMiddleware> _middlewares = [];
 
     public static LiteWebApplicationBuilder CreateBuilder(string[] args) => new();
 
     public Router Router => router;
     public ServiceCollection Services => services;
 
-    // 🟩 YANGILANDI: RequestHandler o‘rniga Delegate ishlatadi
+    #region Handlers
     public void Get(string path, Delegate handler) => router.Get(path, handler);
     public void Post(string path, Delegate handler) => router.Post(path, handler);
     public void Put(string path, Delegate handler) => router.Put(path, handler);
@@ -28,7 +30,8 @@ public class LiteWebApplication(Router router, ServiceCollection services, strin
     public void Delete(string path, RequestHandler handler) => router.Delete(path, handler);
     public void Patch(string path, RequestHandler handler) => router.Patch(path, handler);
     public void Options(string path, RequestHandler handler) => router.Options(path, handler);
-    public void Head(string path, RequestHandler handler) => router.Head(path, handler);
+    public void Head(string path, RequestHandler handler) => router.Head(path, handler); 
+    #endregion
 
     public void Run()
     {
@@ -50,7 +53,24 @@ public class LiteWebApplication(Router router, ServiceCollection services, strin
             {
                 try
                 {
-                    var response = await router.RouteAsync(context.Request);
+                    var liteContext = context.GetContext();
+
+                    async Task ExecuteMiddleware(int index)
+                    {
+                        if (index < _middlewares.Count)
+                        {
+                            await _middlewares[index](liteContext, () => ExecuteMiddleware(index + 1));
+                        }
+                        else
+                        {
+                            var response = await router.RouteAsync(context.Request);
+                            liteContext.Response = response;
+                        }
+                    }
+
+                    await ExecuteMiddleware(0);
+
+                    var response = liteContext.Response ?? Response.NotFound();
                     context.Response.StatusCode = response.StatusCode;
                     context.Response.ContentType = response.ContentType;
                     context.Response.ContentLength64 = response.Body.Length;
@@ -67,5 +87,10 @@ public class LiteWebApplication(Router router, ServiceCollection services, strin
                 }
             });
         }
+    }
+
+    public void Use(LiteMiddleware middleware)
+    {
+        _middlewares.Add(middleware);
     }
 }

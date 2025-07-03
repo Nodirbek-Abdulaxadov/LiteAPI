@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Web;
 
 namespace LiteAPI;
 
@@ -12,25 +13,33 @@ public class LiteHttpContext
     public long ContentLength { get; }
     public string? ContentType { get; }
     public HttpListenerRequest RawRequest { get; }
+    public HttpListenerResponse RawResponse { get; }
+    public Response? Response { get; set; }
 
-    internal LiteHttpContext(HttpListenerRequest request, Dictionary<string, string> routeParams)
+    public LiteHttpContext(HttpListenerContext context, Dictionary<string, string>? routeParams = null)
     {
-        RawRequest = request;
-        Method = request.HttpMethod;
-        Path = request.Url!.AbsolutePath;
-        ContentLength = request.ContentLength64;
-        ContentType = request.ContentType;
-        Headers = request.Headers.AllKeys!.ToDictionary(k => k!, k => request.Headers[k]!, StringComparer.OrdinalIgnoreCase)!;
-        Params = routeParams;
+        RawRequest = context.Request;
+        RawResponse = context.Response;
 
-        Query = [];
-        if (!string.IsNullOrEmpty(request.Url.Query))
+        Path = RawRequest.Url?.AbsolutePath ?? "/";
+        Method = RawRequest.HttpMethod;
+        ContentLength = RawRequest.ContentLength64;
+        ContentType = RawRequest.ContentType;
+
+        Headers = RawRequest.Headers.AllKeys?
+            .ToDictionary(k => k!, k => RawRequest.Headers[k!]!, StringComparer.OrdinalIgnoreCase)
+            ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        Params = routeParams ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        Query = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(RawRequest.Url?.Query))
         {
-            foreach (var pair in request.Url.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+            var parsed = HttpUtility.ParseQueryString(RawRequest.Url.Query);
+            foreach (string key in parsed.AllKeys!)
             {
-                var kv = pair.Split('=', 2);
-                if (kv.Length == 2)
-                    Query[WebUtility.UrlDecode(kv[0])] = WebUtility.UrlDecode(kv[1]);
+                if (key != null)
+                    Query[key] = parsed[key]!;
             }
         }
     }

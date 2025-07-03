@@ -101,6 +101,13 @@ public class Response
         Body = Encode(message)
     };
 
+    public static Response InternalServerError(string message = "Internal Server Error") => new()
+    {
+        StatusCode = 500,
+        ContentType = "text/plain",
+        Body = Encode(message)
+    };
+
     public static Response Text(string text, int statusCode = 200) => new()
     {
         StatusCode = statusCode,

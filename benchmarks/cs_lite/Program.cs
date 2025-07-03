@@ -1,11 +1,20 @@
 ﻿using lite;
 using LiteAPI;
 using LiteAPI.Configurations;
+using System.Diagnostics;
 
 var builder = LiteWebApplication.CreateBuilder(args);
 builder.Configure<Configurations>();
 
 var app = builder.Build();
+app.UseLogging();
+
+app.Use(async (ctx, next) =>
+{
+    var sw = Stopwatch.StartNew();
+    await next();
+    sw.Stop();
+});
 
 app.MapGroup<UsersRoutes>("/api/users");
 app.Get("/config", request =>
@@ -13,7 +22,6 @@ app.Get("/config", request =>
     var config = request.GetService<LiteConfiguration>();
     return Response.OkJson(config);
 });
-
 
 app.Run();
 

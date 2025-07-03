@@ -39,4 +39,9 @@ public static class HttpListenerRequestExtensions
         var body = reader.ReadToEnd();
         return JsonSerializer.Deserialize<T>(body);
     }
+    
+    public static LiteHttpContext GetContext(this HttpListenerContext context, Dictionary<string, string>? routeParams = null)
+    {
+        return new LiteHttpContext(context, routeParams);
+    }
 }
