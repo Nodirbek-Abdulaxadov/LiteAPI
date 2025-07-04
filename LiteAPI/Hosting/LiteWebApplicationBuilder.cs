@@ -1,4 +1,5 @@
-﻿using LiteAPI.Configurations;
+﻿using LiteAPI.Features.Configurations;
+using LiteAPI.Features.DependencyInjection;
 
 namespace LiteAPI;
 

@@ -1,4 +1,4 @@
-﻿using LiteAPI.Configurations;
+﻿using LiteAPI.Features.Configurations;
 
 namespace LiteAPI;
 

@@ -1,5 +1,4 @@
-﻿
-namespace LiteAPI.Configurations;
+﻿namespace LiteAPI.Features.Configurations;
 
 public class LiteConfiguration
 {

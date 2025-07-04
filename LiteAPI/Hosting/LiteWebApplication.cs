@@ -1,4 +1,5 @@
-﻿using LiteAPI.Middlewares;
+﻿using LiteAPI.Features.DependencyInjection;
+using LiteAPI.Middlewares;
 using System.Net;
 
 namespace LiteAPI;
@@ -92,5 +93,14 @@ public class LiteWebApplication(Router router, ServiceCollection services, strin
     public void Use(LiteMiddleware middleware)
     {
         _middlewares.Add(middleware);
+    }
+
+    /// <summary>
+    /// Use a middleware class implementing ILiteMiddleware.
+    /// </summary>
+    public void Use<T>() where T : ILiteMiddleware, new()
+    {
+        var instance = new T();
+        _middlewares.Add(async (ctx, next) => await instance.InvokeAsync(ctx, next));
     }
 }

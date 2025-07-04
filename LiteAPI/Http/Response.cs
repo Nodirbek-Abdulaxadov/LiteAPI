@@ -64,7 +64,6 @@ public class Response
             ContentType = "application/json",
             Body = obj is not null ? EncodeJson(obj) : []
         };
-        // Optional: add "Location" header support in your pipeline
         return response;
     }
 
@@ -76,7 +75,6 @@ public class Response
             ContentType = "application/json",
             Body = obj is not null ? EncodeJson(obj) : []
         };
-        // Optional: add "Location" header support in your pipeline
         return response;
     }
 
@@ -99,6 +97,13 @@ public class Response
         StatusCode = 403,
         ContentType = "text/plain",
         Body = Encode(message)
+    };
+
+    public static Response TooManyRequests(string message = "Too Many Requests") => new()
+    {
+        StatusCode = 429,
+        ContentType = "text/plain",
+        Body = Encoding.UTF8.GetBytes(message),
     };
 
     public static Response InternalServerError(string message = "Internal Server Error") => new()

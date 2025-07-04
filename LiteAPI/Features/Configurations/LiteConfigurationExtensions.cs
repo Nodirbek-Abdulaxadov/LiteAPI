@@ -1,6 +1,4 @@
-﻿using LiteAPI.Configurations;
-
-namespace LiteAPI;
+﻿namespace LiteAPI.Features.Configurations;
 
 public static class LiteConfigurationExtensions
 {

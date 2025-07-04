@@ -1,4 +1,4 @@
-﻿namespace LiteAPI;
+﻿namespace LiteAPI.Features.DependencyInjection;
 
 public class ServiceDescriptor
 {
