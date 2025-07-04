@@ -3,6 +3,7 @@
 var builder = LiteWebApplication.CreateBuilder(args);
 
 builder.Configure<Configurations>();
+builder.Services.AddSingleton<MockUserService>();
 builder.AddAuthentication(options =>
 {
     options.DefaultScheme = AuthScheme.Bearer;

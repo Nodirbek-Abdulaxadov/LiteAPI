@@ -9,16 +9,16 @@ A **minimal, dependency-free C# micro web framework** for building **lightweight
 Install via **NuGet**:
 
 ```bash
-dotnet add package LiteAPI.Core --version 1.1.0
+dotnet add package LiteAPI.Core --version 1.1.1
 ```
 
 Or via **Package Manager**:
 
 ```powershell
-Install-Package LiteAPI.Core -Version 1.1.0
+Install-Package LiteAPI.Core -Version 1.1.1
 ```
 
-Ready for **.NET 6, 7, 8 LTS**.
+Ready for **.NET 6, 7, 8, 9 LTS**.
 
 ---
 

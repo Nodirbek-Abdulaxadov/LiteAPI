@@ -2,12 +2,13 @@
 {
     private readonly Router _router;
     private readonly string _prefix;
-    private readonly ServiceProvider? _provider;
+    private readonly ServiceCollection? _services;
 
     public LiteWebApplicationGroup(Router router, string prefix, ServiceCollection? services = null)
     {
         _router = router;
         _prefix = prefix.TrimEnd('/');
+        _services = services;
 
         if (_prefix == "")
             _prefix = "/";
@@ -22,9 +23,11 @@
 
     public T Inject<T>() where T : class
     {
-        if (_provider == null)
-            throw new InvalidOperationException("ServiceProvider is not available for injection in this group.");
-        return _provider.GetService<T>();
+        if (_services == null)
+            throw new InvalidOperationException("ServiceCollection is not available for injection in this group.");
+
+        // DRY tarzda, har safar yangisini bermaydi, ro'yxatdan o'tgan qoidaga ko'ra beradi
+        return (T)_services.Resolve(typeof(T), []);
     }
 
     public void Get(string path, RequestHandler handler) => _router.Get(Combine(path), handler);
