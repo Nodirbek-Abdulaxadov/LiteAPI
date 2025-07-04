@@ -16,7 +16,7 @@
 		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
 		<PackageReadmeFile>Readme.md</PackageReadmeFile>
 		<PackageIcon>5e06e330-c610-4a40-935b-7b7ec75d9429 1 (2).png</PackageIcon>
-		<Version>1.0.1</Version>
+		<Version>1.1.0</Version>
 		<RootNamespace>LiteAPI</RootNamespace>
 		<NoWarn>$(NoWarn);CA1050</NoWarn>
 		<NoWarn>$(NoWarn);IDE0130</NoWarn>

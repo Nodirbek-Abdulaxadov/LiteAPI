@@ -1,56 +1,66 @@
-﻿Here is your **fully updated, clean, professional `README.md`** for **LiteAPI**, reflecting **all current features without the outdated folder structure**:
+﻿# 🚀 LiteAPI
+
+A **minimal, dependency-free C# micro web framework** for building **lightweight REST APIs, dashboards, internal tools, and microservices** without the complexity of heavy frameworks.
 
 ---
 
-# 🚀 LiteAPI
+## 📦 Installation
 
-A **minimal, dependency-free C# micro web framework** for building **lightweight REST APIs, internal tools, and microservices** without the complexity of heavy frameworks.
+Install via **NuGet**:
+
+```bash
+dotnet add package LiteAPI.Core --version 1.1.0
+```
+
+Or via **Package Manager**:
+
+```powershell
+Install-Package LiteAPI.Core -Version 1.1.0
+```
+
+Ready for **.NET 6, 7, 8 LTS**.
 
 ---
 
 ## ✨ Features
 
-✅ **Zero dependencies** – fully standalone, runs anywhere .NET runs.
+✅ **Zero dependencies** – fully standalone, tiny, fast.
 
-✅ **Minimal & fast** – low overhead, instant startup.
+✅ **JSON + text responses out of the box**.
 
-✅ **JSON parsing & structured JSON/text responses** out of the box.
+✅ **Lightweight DI container** (Singleton, Scoped, Transient).
 
-✅ **Lightweight DI container**:
+✅ **Signature-based routing with parameter extraction**.
 
-* Singleton, Scoped, Transient lifetimes
-* Auto-inject into request handlers and services
+✅ **Automatic model binding:**
 
-✅ **Flexible Routing**:
+* `[FromBody]`, `[FromForm]`, `[FromQuery]`, `[FromRoute]`.
 
-* Supports `GET`, `POST`, `PUT`, `DELETE`, `PATCH`, `OPTIONS`, `HEAD`
-* Route parameter extraction (e.g., `/api/users/{id}`)
-* Query parsing to objects (`?page=1&pageSize=10` → `QueryParams`)
 
-✅ **Form and JSON body binding**:
+✅ **Async/await handler support**.
 
-* `[FromBody]`, `[FromForm]`, `[FromQuery]`, `[FromRoute]` support for handler parameters
-* Automatic type binding for DTOs, primitives, and complex models
+✅ **Middleware pipeline** (`app.UseLogging()`, `app.UseCors()`, etc).
 
-✅ **Async/Await support in handlers** for scalable IO-bound operations.
+✅ **Authentication & Authorization**:
 
-✅ **Route grouping** (`MapGroup<T>`) for modular endpoint organization.
+* API Key, Bearer Token auth.
+* Policy and role-based route protection.
 
-✅ **Code-based configuration system**:
+✅ **Route grouping for modular structure**.
 
-* `LiteConfiguration` with project-level initialization
-* Supports `Urls`, `LaunchBrowser`, and custom `Values`
-* Configurable via `builder.Configure<MyConfig>()`
+✅ **Static file serving** (`app.MapStaticFiles()`).
 
-✅ **Static file serving** for dashboard/admin tools.
+✅ **Optional OpenAPI (Swagger) generation** for testing endpoints.
 
-✅ **Clear error handling** for development and production scenarios.
+✅ **Launch browser on startup** for local dashboards.
 
-✅ **Predictable, clean architecture** for learning and internal tooling.
+✅ **Clean, readable structure with intuitive extension methods**.
+
+✅ **No black-box magic, easy to learn and extend**.
 
 ---
 
-## 🚀 Example Usage
+## 🚀 Quick Example
 
 ```csharp
 using LiteAPI;
@@ -58,20 +68,37 @@ using LiteAPI;
 var builder = LiteWebApplication.CreateBuilder(args);
 builder.Configure<MyConfiguration>();
 
-var app = builder.Build();
-
-app.Get("/", ctx => Response.Ok("Welcome to LiteAPI!"));
-
-app.Get("/api/users/{id}", (HttpListenerRequest req, int id) =>
+builder.AddAuthentication(auth =>
 {
-    var user = UserRepository.GetUser(id);
-    return user != null ? Response.OkJson(user) : Response.NotFound();
+    auth.DefaultScheme = AuthScheme.Bearer;
+    auth.ValidateBearerToken = token => token == "secret-token";
 });
+
+builder.AddAuthorization(authz =>
+{
+    authz.AddPolicy("AdminOnly", ctx =>
+        ctx.Headers.TryGetValue("X-Role", out var role) && role == "Admin");
+});
+
+var app = builder.Build();
+app.UseLogging();
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.Get("/", ctx => Response.Ok("Welcome to LiteAPI 🚀"));
+
+app.Get("/api/users/{id}", (HttpListenerRequest req, [FromRoute] int id) =>
+{
+    var userService = req.GetService<UserService>();
+    var user = userService.GetById(id);
+    return user != null ? Response.OkJson(user) : Response.NotFound();
+}).RequireRoles("Admin");
 
 app.Post("/api/users", (HttpListenerRequest req, [FromBody] UserDto user) =>
 {
-    UserRepository.AddUser(user);
-    return Response.Created($"/api/users/{user.Id}", user);
+    var userService = req.GetService<UserService>();
+    var created = userService.Add(user);
+    return Response.Created($"/api/users/{created.Id}", created);
 });
 
 app.Run();
@@ -79,18 +106,12 @@ app.Run();
 
 ---
 
-## 🛠️ Advanced Features
+## 🛠️ Advanced Usage
 
-✅ **DI usage example:**
+✅ **Dependency Injection:**
 
 ```csharp
-builder.Services.AddSingleton<IMyService, MyService>();
-
-app.Get("/service", req =>
-{
-    var service = req.GetService<IMyService>();
-    return Response.Ok(service.DoWork());
-});
+builder.Services.AddSingleton<UserService>();
 ```
 
 ✅ **Query parsing:**
@@ -98,7 +119,7 @@ app.Get("/service", req =>
 ```csharp
 app.Get("/api/items", (HttpListenerRequest req, [FromQuery] QueryParams query) =>
 {
-    var items = ItemRepository.GetPaged(query.Page, query.PageSize, query.Search);
+    var items = ItemService.GetPaged(query.Page, query.PageSize, query.Search);
     return Response.OkJson(items);
 });
 ```
@@ -109,57 +130,90 @@ app.Get("/api/items", (HttpListenerRequest req, [FromQuery] QueryParams query) =
 app.MapGroup<UsersRoutes>("/api/users");
 ```
 
-✅ **Static files:**
+✅ **Middleware pipeline:**
 
 ```csharp
-app.MapStaticFiles(); // serves from `wwwroot/`
+app.UseLogging();
+app.UseCors();
+app.UseExceptionHandling();
 ```
 
 ✅ **Async handlers:**
 
 ```csharp
-app.Get("/api/slow", async req =>
+app.Get("/delay", async ctx =>
 {
     await Task.Delay(1000);
     return Response.Ok("Done!");
 });
 ```
 
+✅ **Static files:**
+
+```csharp
+app.MapStaticFiles();
+```
+
+✅ **OpenAPI (Swagger):**
+
+```csharp
+app.UseOpenApi();
+```
+
 ---
 
-## 🛡️ Stability & Roadmap
+## 🪐 Roadmap
 
-LiteAPI is **production-friendly** for **internal tools and lightweight APIs**.
+✅ Middleware pipeline
 
-Planned features:
+✅ Auth & policy-based authorization
 
-* Middleware pipeline (logging, auth, CORS)
-* Built-in CORS support
-* Graceful shutdown signals
-* Optional Swagger/OpenAPI integration
-* Rate limiting and caching extensions
+✅ OpenAPI (Swagger) support
+
+✅ Route grouping & parameter binding
+
+✅ Static file serving
+
+✅ Async pipeline
+
+✅ Lightweight DI
+
+✅ Rate limiting middleware
+
+**Next planned:**
+
+* Caching middleware.
+* Request validation extensions.
+* CLI scaffolding for generating LiteAPI projects quickly.
 
 ---
 
 ## 🤝 Contributing
 
-Pull requests are welcome! Feel free to open issues for feature requests or bugs.
+Pull requests and discussions are welcome!
+
+✅ Add examples
+
+✅ Improve documentation
+
+✅ Suggest advanced DI features
 
 ---
 
 ## 🪐 License
 
-MIT License
+MIT License.
 
 ---
 
 ## ✉️ Contact
 
-For collaboration, consulting, or enterprise support:
+**Author:** [@nbkabdulaxadov](https://t.me/nbkabdulaxadov) on Telegram
 
-* Telegram: [@nbkabdulaxadov](https://t.me/nbkabdulaxadov)
-* Email: [nbkabdulakhadov@gmail.com](mailto:nbkabdulakhadov@gmail.com)
+**Email:** [nbkabdulakhadov@gmail.com](mailto:nbkabdulakhadov@gmail.com)
 
 ---
 
-**Happy building lightweight, productive APIs with LiteAPI!**
+**Start building clean, fast, lightweight APIs with LiteAPI today 🚀!**
+
+---
