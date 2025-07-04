@@ -21,6 +21,13 @@ public class Response
         return Encoding.UTF8.GetBytes(JsonSerializer.Serialize(obj, options));
     }
 
+    public static Response Html(string html, int statusCode = 200) => new()
+    {
+        StatusCode = statusCode,
+        ContentType = "text/html",
+        Body = Encoding.UTF8.GetBytes(html)
+    };
+
     public static Response Ok(string text) => new()
     {
         StatusCode = 200,

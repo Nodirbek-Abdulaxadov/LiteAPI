@@ -18,6 +18,8 @@ public class Router
         WriteIndented = true
     };
 
+    public Dictionary<(string method, string path), Delegate> GetRoutes() => routes;
+
     private void Handle(string method, string path, Delegate handler) =>
         routes[(method.ToUpperInvariant(), path)] = handler;
 

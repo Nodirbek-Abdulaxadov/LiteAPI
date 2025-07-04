@@ -1,7 +1,6 @@
 ﻿using lite;
 using LiteAPI;
 using LiteAPI.Features.Configurations;
-using LiteAPI.Features.Cors;
 using System.Diagnostics;
 
 var builder = LiteWebApplication.CreateBuilder(args);
@@ -24,11 +23,7 @@ app.Get("/config", request =>
     return Response.OkJson(config);
 });
 
-app.UseCors("https://site1.com", "https://site2.com")
-   .AllowMethods("GET", "POST")
-   .AllowHeaders("Content-Type", "Authorization")
-   .AllowAnyOrigin()
-   .AllowCredentials();
+app.UseOpenApi("/swagger", "LiteAPI Example", "v1");
 
 app.Run();
 
