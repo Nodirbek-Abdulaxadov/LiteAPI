@@ -1,6 +1,4 @@
-﻿namespace LiteAPI.Features.Cors;
-
-public class LiteCorsBuilder
+﻿public class LiteCorsBuilder
 {
     internal HashSet<string> AllowedOrigins { get; } = new(StringComparer.OrdinalIgnoreCase);
     internal string AllowedMethods { get; private set; } = "GET, POST, PUT, DELETE, OPTIONS";

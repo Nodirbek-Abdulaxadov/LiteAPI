@@ -1,10 +1,4 @@
-﻿using System.Collections.Specialized;
-using System.Globalization;
-using System.Text;
-
-namespace LiteAPI;
-
-public static class RequestBinder
+﻿public static class RequestBinder
 {
     public static T Bind<T>(string formData) where T : new()
     {

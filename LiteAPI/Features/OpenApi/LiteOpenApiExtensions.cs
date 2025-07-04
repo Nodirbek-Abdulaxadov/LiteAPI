@@ -1,6 +1,4 @@
-﻿namespace LiteAPI;
-
-public static class LiteOpenApiExtensions
+﻿public static class LiteOpenApiExtensions
 {
     public static LiteWebApplication UseOpenApi(
         this LiteWebApplication app,

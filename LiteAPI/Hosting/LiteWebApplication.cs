@@ -1,10 +1,4 @@
-﻿using LiteAPI.Features.DependencyInjection;
-using LiteAPI.Middlewares;
-using System.Net;
-
-namespace LiteAPI;
-
-/// <summary>
+﻿/// <summary>
 /// LiteWebApplication: signature-based routing with delegate support and auth.
 /// </summary>
 public class LiteWebApplication(

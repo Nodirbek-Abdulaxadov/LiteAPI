@@ -1,8 +1,4 @@
-﻿using System.Collections.Concurrent;
-
-namespace LiteAPI;
-
-public static class LiteRateLimitingMiddlewareExtensions
+﻿public static class LiteRateLimitingMiddlewareExtensions
 {
     public static LiteWebApplication UseRateLimiting(
         this LiteWebApplication app,

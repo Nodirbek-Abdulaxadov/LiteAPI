@@ -1,6 +1,4 @@
-﻿namespace LiteAPI;
-
-public class AuthenticationOptions
+﻿public class AuthenticationOptions
 {
     public AuthScheme DefaultScheme { get; set; } = AuthScheme.None;
     public string ApiKeyHeader { get; set; } = "X-API-KEY";

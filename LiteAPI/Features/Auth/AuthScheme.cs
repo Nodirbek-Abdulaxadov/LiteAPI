@@ -1,6 +1,4 @@
-﻿namespace LiteAPI;
-
-public enum AuthScheme
+﻿public enum AuthScheme
 {
     None,
     ApiKey,

@@ -1,6 +1,4 @@
-﻿namespace LiteAPI.Features.DependencyInjection;
-
-public class ServiceDescriptor
+﻿public class ServiceDescriptor
 {
     public Type ServiceType { get; }
     public Type ImplementationType { get; }

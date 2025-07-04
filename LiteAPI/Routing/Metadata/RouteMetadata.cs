@@ -1,6 +1,4 @@
-﻿namespace LiteAPI;
-
-public class RouteMetadata
+﻿public class RouteMetadata
 {
     public bool AllowAnonymous { get; set; }
     public string? RequiredPolicy { get; set; }

@@ -1,11 +1,4 @@
-﻿using LiteAPI.Features.DependencyInjection;
-using System.Net;
-using System.Runtime.CompilerServices;
-using System.Text.Json;
-
-namespace LiteAPI;
-
-public static class HttpListenerRequestExtensions
+﻿public static class HttpListenerRequestExtensions
 {
     private class RequestScope(ServiceCollection services)
     {

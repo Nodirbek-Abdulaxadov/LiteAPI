@@ -1,6 +1,4 @@
-﻿namespace LiteAPI.Features.DependencyInjection;
-
-public enum ServiceLifetime
+﻿public enum ServiceLifetime
 {
     Singleton,
     Scoped,

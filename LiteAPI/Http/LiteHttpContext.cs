@@ -1,9 +1,4 @@
-﻿using System.Net;
-using System.Web;
-
-namespace LiteAPI;
-
-public class LiteHttpContext
+﻿public class LiteHttpContext
 {
     public string Method { get; }
     public string Path { get; }

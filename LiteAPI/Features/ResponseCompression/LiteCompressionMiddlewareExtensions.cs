@@ -1,8 +1,4 @@
-﻿using System.IO.Compression;
-
-namespace LiteAPI;
-
-public static class LiteCompressionMiddlewareExtensions
+﻿public static class LiteCompressionMiddlewareExtensions
 {
     public static LiteWebApplication UseCompression(this LiteWebApplication app)
     {

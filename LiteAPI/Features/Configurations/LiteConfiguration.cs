@@ -1,6 +1,4 @@
-﻿namespace LiteAPI.Features.Configurations;
-
-public class LiteConfiguration
+﻿public class LiteConfiguration
 {
     public virtual string[] Urls { get; set; } = [];
     public virtual bool LaunchBrowser { get; set; }

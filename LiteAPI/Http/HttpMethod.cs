@@ -1,6 +1,4 @@
-﻿namespace LiteAPI;
-
-public enum HttpMethod
+﻿public enum HttpMethod
 {
     GET,
     POST,

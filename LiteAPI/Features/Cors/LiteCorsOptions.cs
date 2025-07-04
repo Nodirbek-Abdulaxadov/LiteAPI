@@ -1,6 +1,4 @@
-﻿namespace LiteAPI.Features.Cors;
-
-public class LiteCorsOptions
+﻿public class LiteCorsOptions
 {
     public HashSet<string> AllowedOrigins { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public bool AllowAnyOrigin { get; set; } = false;

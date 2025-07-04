@@ -1,6 +1,4 @@
-﻿namespace LiteAPI.Routing.Grouping;
-
-public interface ILiteGroup
+﻿public interface ILiteGroup
 {
     void Register(LiteWebApplicationGroup group);
 }

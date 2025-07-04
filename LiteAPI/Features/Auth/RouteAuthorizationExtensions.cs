@@ -1,6 +1,4 @@
-﻿namespace LiteAPI;
-
-public static class RouteAuthorizationExtensions
+﻿public static class RouteAuthorizationExtensions
 {
     public static void AllowAnonymous(this Delegate handler, LiteWebApplication app, string path, string method)
     {

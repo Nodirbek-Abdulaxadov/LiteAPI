@@ -1,6 +1,4 @@
-﻿namespace LiteAPI.Features.Cors;
-
-public static class LiteWebApplicationCorsExtensions
+﻿public static class LiteWebApplicationCorsExtensions
 {
     public static LiteCorsBuilder UseCors(this LiteWebApplication app, params string[] origins)
     {

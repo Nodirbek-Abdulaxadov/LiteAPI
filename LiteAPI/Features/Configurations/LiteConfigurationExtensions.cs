@@ -1,6 +1,4 @@
-﻿namespace LiteAPI.Features.Configurations;
-
-public static class LiteConfigurationExtensions
+﻿public static class LiteConfigurationExtensions
 {
     public static T? Get<T>(this LiteConfiguration config, string key, T? defaultValue = default)
     {

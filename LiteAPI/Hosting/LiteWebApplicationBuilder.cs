@@ -1,9 +1,4 @@
-﻿using LiteAPI.Features.Configurations;
-using LiteAPI.Features.DependencyInjection;
-
-namespace LiteAPI;
-
-public class LiteWebApplicationBuilder
+﻿public class LiteWebApplicationBuilder
 {
     public Router Router { get; } = new();
     public ServiceCollection Services { get; } = new();

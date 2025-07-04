@@ -1,6 +1,4 @@
-﻿namespace LiteAPI;
-
-public class RouteDefinition(string method, string path, Delegate handler)
+﻿public class RouteDefinition(string method, string path, Delegate handler)
 {
     public string Path { get; } = path;
     public string Method { get; } = method;

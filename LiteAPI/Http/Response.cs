@@ -1,9 +1,4 @@
-﻿using System.Text;
-using System.Text.Json;
-
-namespace LiteAPI;
-
-public class Response
+﻿public class Response
 {
     public int StatusCode { get; set; } = 200;
     public string ContentType { get; set; } = "text/plain";

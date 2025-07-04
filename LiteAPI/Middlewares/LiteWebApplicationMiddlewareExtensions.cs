@@ -1,6 +1,4 @@
-﻿namespace LiteAPI;
-
-public static class LiteWebApplicationMiddlewareExtensions
+﻿public static class LiteWebApplicationMiddlewareExtensions
 {
     public static LiteWebApplication UseLogging(this LiteWebApplication app)
     {

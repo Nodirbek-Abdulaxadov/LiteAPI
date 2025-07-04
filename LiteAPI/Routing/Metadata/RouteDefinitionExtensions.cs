@@ -1,6 +1,4 @@
-﻿namespace LiteAPI;
-
-public static class RouteDefinitionExtensions
+﻿public static class RouteDefinitionExtensions
 {
     public static RouteDefinition AllowAnonymous(this RouteDefinition route)
     {

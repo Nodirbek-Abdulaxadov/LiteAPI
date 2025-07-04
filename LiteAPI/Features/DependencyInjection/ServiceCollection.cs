@@ -1,6 +1,4 @@
-﻿namespace LiteAPI.Features.DependencyInjection;
-
-public class ServiceCollection
+﻿public class ServiceCollection
 {
     private readonly Dictionary<Type, ServiceDescriptor> _descriptors = [];
     private readonly Dictionary<Type, object> _singletonInstances = [];

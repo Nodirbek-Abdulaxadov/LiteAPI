@@ -1,8 +1,4 @@
-﻿using LiteAPI.Features.Configurations;
-
-namespace LiteAPI;
-
-public static class LiteWebApplicationBuilderExtensions
+﻿public static class LiteWebApplicationBuilderExtensions
 {
     public static LiteWebApplicationBuilder Configure<TConfig>(this LiteWebApplicationBuilder builder)
         where TConfig : LiteConfiguration, new()
@@ -17,6 +13,7 @@ public static class LiteWebApplicationBuilderExtensions
 
         return builder;
     }
+
     public static LiteWebApplication UseAuthentication(this LiteWebApplication app)
     {
         app.Use(async (ctx, next) =>

@@ -1,11 +1,10 @@
-﻿namespace LiteAPI.Routing.Grouping;
-
-public class LiteWebApplicationGroup
+﻿public class LiteWebApplicationGroup
 {
     private readonly Router _router;
     private readonly string _prefix;
+    private readonly ServiceProvider? _provider;
 
-    public LiteWebApplicationGroup(Router router, string prefix)
+    public LiteWebApplicationGroup(Router router, string prefix, ServiceCollection? services = null)
     {
         _router = router;
         _prefix = prefix.TrimEnd('/');
@@ -19,6 +18,13 @@ public class LiteWebApplicationGroup
         if (path == "/")
             return _prefix;
         return $"{_prefix}/{path.TrimStart('/')}";
+    }
+
+    public T Inject<T>() where T : class
+    {
+        if (_provider == null)
+            throw new InvalidOperationException("ServiceProvider is not available for injection in this group.");
+        return _provider.GetService<T>();
     }
 
     public void Get(string path, RequestHandler handler) => _router.Get(Combine(path), handler);

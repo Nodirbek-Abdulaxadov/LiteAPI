@@ -1,12 +1,4 @@
-﻿using System.Globalization;
-using System.Net;
-using System.Reflection;
-using System.Text;
-using System.Text.Json;
-
-namespace LiteAPI;
-
-/// <summary>
+﻿/// <summary>
 /// Minimal router for LiteAPI with signature-based routing.
 /// </summary>
 public class Router
