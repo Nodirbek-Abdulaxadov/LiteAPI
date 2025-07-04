@@ -5,9 +5,22 @@ using System.Diagnostics;
 
 var builder = LiteWebApplication.CreateBuilder(args);
 builder.Configure<Configurations>();
+builder.AddAuthentication(options =>
+{
+    options.DefaultScheme = AuthScheme.Bearer;
+    options.ValidateBearerToken = token => token == "secret-token";
+});
+
+builder.AddAuthorization(options =>
+{
+    options.AddPolicy("AdminOnly", ctx =>
+        ctx.Headers.TryGetValue("X-Role", out var role) && role == "Admin");
+});
 
 var app = builder.Build();
 app.UseLogging();
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.Use(async (ctx, next) =>
 {
@@ -21,24 +34,6 @@ app.Get("/config", request =>
 {
     var config = request.GetService<LiteConfiguration>();
     return Response.OkJson(config);
-});
-
-app.UseOpenApi("/swagger", "LiteAPI Example", "v1");
+}).RequireRoles("Admin");
 
 app.Run();
-
-internal class QueryParams
-    {
-    public int Page { get; set; } = 1;
-    public int PageSize { get; set; } = 10;
-    public string? Search { get; set; }
-}
-internal class UserDto
-{
-    public int Id { get; set; } = 0;
-    public string Name { get; set; } = string.Empty;
-    public string Email { get; set; } = string.Empty;
-    public int Age { get; set; } = 0;
-    public override string ToString() => $"{Name} ({Email}), Age: {Age}";
-
-}

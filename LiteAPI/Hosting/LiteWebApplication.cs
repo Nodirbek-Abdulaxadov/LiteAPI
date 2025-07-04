@@ -5,42 +5,57 @@ using System.Net;
 namespace LiteAPI;
 
 /// <summary>
-/// LiteWebApplication: signature-based routing with delegate support.
+/// LiteWebApplication: signature-based routing with delegate support and auth.
 /// </summary>
-public class LiteWebApplication(Router router, ServiceCollection services, string[] urls)
+public class LiteWebApplication(
+    Router router,
+    ServiceCollection services,
+    string[] urls,
+    AuthenticationOptions authOptions,
+    AuthorizationOptions authorizationOptions)
 {
     private readonly HttpListener _listener = new();
     private readonly List<LiteMiddleware> _middlewares = [];
 
-    public static LiteWebApplicationBuilder CreateBuilder(string[] args) => new();
-
     public Router Router => router;
     public ServiceCollection Services => services;
+    public AuthenticationOptions AuthOptions => authOptions;
+    public AuthorizationOptions AuthorizationOptions => authorizationOptions;
+
+    public static LiteWebApplicationBuilder CreateBuilder(string[] args) => new();
 
     #region Handlers
-    public void Get(string path, Delegate handler) => router.Get(path, handler);
-    public void Post(string path, Delegate handler) => router.Post(path, handler);
-    public void Put(string path, Delegate handler) => router.Put(path, handler);
-    public void Delete(string path, Delegate handler) => router.Delete(path, handler);
-    public void Patch(string path, Delegate handler) => router.Patch(path, handler);
-    public void Options(string path, Delegate handler) => router.Options(path, handler);
-    public void Head(string path, Delegate handler) => router.Head(path, handler);
-    public void Get(string path, RequestHandler handler) => router.Get(path, handler);
-    public void Post(string path, RequestHandler handler) => router.Post(path, handler);
-    public void Put(string path, RequestHandler handler) => router.Put(path, handler);
-    public void Delete(string path, RequestHandler handler) => router.Delete(path, handler);
-    public void Patch(string path, RequestHandler handler) => router.Patch(path, handler);
-    public void Options(string path, RequestHandler handler) => router.Options(path, handler);
-    public void Head(string path, RequestHandler handler) => router.Head(path, handler); 
+    public RouteDefinition Get(string path, Delegate handler) => router.Get(path, handler);
+    public RouteDefinition Post(string path, Delegate handler) => router.Post(path, handler);
+    public RouteDefinition Put(string path, Delegate handler) => router.Put(path, handler);
+    public RouteDefinition Delete(string path, Delegate handler) => router.Delete(path, handler);
+    public RouteDefinition Patch(string path, Delegate handler) => router.Patch(path, handler);
+    public RouteDefinition Options(string path, Delegate handler) => router.Options(path, handler);
+    public RouteDefinition Head(string path, Delegate handler) => router.Head(path, handler);
+    public RouteDefinition Get(string path, RequestHandler handler) => router.Get(path, handler);
+    public RouteDefinition Post(string path, RequestHandler handler) => router.Post(path, handler);
+    public RouteDefinition Put(string path, RequestHandler handler) => router.Put(path, handler);
+    public RouteDefinition Delete(string path, RequestHandler handler) => router.Delete(path, handler);
+    public RouteDefinition Patch(string path, RequestHandler handler) => router.Patch(path, handler);
+    public RouteDefinition Options(string path, RequestHandler handler) => router.Options(path, handler);
+    public RouteDefinition Head(string path, RequestHandler handler) => router.Head(path, handler);
     #endregion
+
+    public void Use(LiteMiddleware middleware) => _middlewares.Add(middleware);
+
+    /// <summary>
+    /// Use a middleware class implementing ILiteMiddleware.
+    /// </summary>
+    public void Use<T>() where T : ILiteMiddleware, new()
+    {
+        var instance = new T();
+        _middlewares.Add(async (ctx, next) => await instance.InvokeAsync(ctx, next));
+    }
 
     public void Run()
     {
         foreach (var url in urls)
-        {
-            var fixedUrl = url.EndsWith('/') ? url : url + "/";
-            _listener.Prefixes.Add(fixedUrl);
-        }
+            _listener.Prefixes.Add(url.EndsWith('/') ? url : url + "/");
 
         _listener.Start();
         Console.WriteLine($"LiteAPI running on: {string.Join(", ", urls)}");
@@ -59,14 +74,9 @@ public class LiteWebApplication(Router router, ServiceCollection services, strin
                     async Task ExecuteMiddleware(int index)
                     {
                         if (index < _middlewares.Count)
-                        {
                             await _middlewares[index](liteContext, () => ExecuteMiddleware(index + 1));
-                        }
                         else
-                        {
-                            var response = await router.RouteAsync(context.Request);
-                            liteContext.Response = response;
-                        }
+                            liteContext.Response = await router.RouteAsync(context.Request);
                     }
 
                     await ExecuteMiddleware(0);
@@ -88,19 +98,5 @@ public class LiteWebApplication(Router router, ServiceCollection services, strin
                 }
             });
         }
-    }
-
-    public void Use(LiteMiddleware middleware)
-    {
-        _middlewares.Add(middleware);
-    }
-
-    /// <summary>
-    /// Use a middleware class implementing ILiteMiddleware.
-    /// </summary>
-    public void Use<T>() where T : ILiteMiddleware, new()
-    {
-        var instance = new T();
-        _middlewares.Add(async (ctx, next) => await instance.InvokeAsync(ctx, next));
     }
 }

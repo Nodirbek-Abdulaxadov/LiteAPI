@@ -11,26 +11,29 @@ namespace LiteAPI;
 /// </summary>
 public class Router
 {
-    private readonly Dictionary<(string method, string path), Delegate> routes = [];
+    private readonly Dictionary<(string method, string path), RouteDefinition> routes = [];
+    private readonly Dictionary<(string method, string path), RouteMetadata> _routeMetadata = [];
     private readonly JsonSerializerOptions jsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
         WriteIndented = true
     };
 
-    public Dictionary<(string method, string path), Delegate> GetRoutes() => routes;
+    public RouteDefinition Get(string path, Delegate handler) => Handle("GET", path, handler);
+    public RouteDefinition Post(string path, Delegate handler) => Handle("POST", path, handler);
+    public RouteDefinition Put(string path, Delegate handler) => Handle("PUT", path, handler);
+    public RouteDefinition Delete(string path, Delegate handler) => Handle("DELETE", path, handler);
+    public RouteDefinition Patch(string path, Delegate handler) => Handle("PATCH", path, handler);
+    public RouteDefinition Options(string path, Delegate handler) => Handle("OPTIONS", path, handler);
+    public RouteDefinition Head(string path, Delegate handler) => Handle("HEAD", path, handler);
+    public Dictionary<(string method, string path), RouteDefinition> GetRoutes() => routes;
 
-    private void Handle(string method, string path, Delegate handler) =>
-        routes[(method.ToUpperInvariant(), path)] = handler;
-
-    public void Get(string path, Delegate handler) => Handle("GET", path, handler);
-    public void Post(string path, Delegate handler) => Handle("POST", path, handler);
-    public void Put(string path, Delegate handler) => Handle("PUT", path, handler);
-    public void Delete(string path, Delegate handler) => Handle("DELETE", path, handler);
-    public void Patch(string path, Delegate handler) => Handle("PATCH", path, handler);
-    public void Options(string path, Delegate handler) => Handle("OPTIONS", path, handler);
-    public void Head(string path, Delegate handler) => Handle("HEAD", path, handler);
-
+    private RouteDefinition Handle(string method, string path, Delegate handler)
+    {
+        var def = new RouteDefinition(method.ToUpperInvariant(), path, handler);
+        routes[(def.Method, def.Path)] = def;
+        return def;
+    }
     public Response Route(HttpListenerRequest request)
     {
         string method = request.HttpMethod.ToUpperInvariant();
@@ -43,8 +46,8 @@ public class Router
 
             if (TryMatchRoute(path, routePath, out var routeParams))
             {
-                var handler = route.Value;
-                var parameters = handler.Method.GetParameters();
+                var routeDefinition = route.Value;
+                var parameters = routeDefinition.Handler.Method.GetParameters();
                 var args = new object?[parameters.Length];
 
                 for (int i = 0; i < parameters.Length; i++)
@@ -73,7 +76,7 @@ public class Router
 
                 try
                 {
-                    var result = handler.DynamicInvoke(args);
+                    var result = routeDefinition.Handler.DynamicInvoke(args);
                     return (Response)result!;
                 }
                 catch (Exception ex)
@@ -83,12 +86,11 @@ public class Router
             }
         }
 
-        // Wildcard fallback check: "/{*path}"
         if (routes.TryGetValue((method, "/{*path}"), out var wildcardHandler))
         {
             try
             {
-                var result = wildcardHandler.DynamicInvoke(request);
+                var result = wildcardHandler.Handler.DynamicInvoke(request);
                 return (Response)result!;
             }
             catch (Exception ex)
@@ -104,7 +106,6 @@ public class Router
             Body = Encoding.UTF8.GetBytes("Not Found")
         };
     }
-
     public async Task<Response> RouteAsync(HttpListenerRequest request)
     {
         string method = request.HttpMethod.ToUpperInvariant();
@@ -117,8 +118,8 @@ public class Router
 
             if (TryMatchRoute(path, routePath, out var routeParams))
             {
-                var handler = route.Value;
-                var parameters = handler.Method.GetParameters();
+                var routeDefinition = route.Value;
+                var parameters = routeDefinition.Handler.Method.GetParameters();
                 var args = new object?[parameters.Length];
 
                 for (int i = 0; i < parameters.Length; i++)
@@ -217,7 +218,7 @@ public class Router
 
                 try
                 {
-                    var result = handler.DynamicInvoke(args);
+                    var result = routeDefinition.Handler.DynamicInvoke(args);
 
                     if (result is Task<Response> taskResponse)
                     {
@@ -241,7 +242,6 @@ public class Router
 
         return Response.NotFound();
     }
-
     private static bool TryMatchRoute(string requestPath, string routePath, out Dictionary<string, string> parameters)
     {
         parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -266,10 +266,8 @@ public class Router
         }
         return true;
     }
-
     private static object? GetDefault(Type type) =>
         type.IsValueType ? Activator.CreateInstance(type) : null;
-
     private static bool IsSimpleType(Type type)
     {
         return type.IsPrimitive
@@ -278,5 +276,13 @@ public class Router
             || type.Equals(typeof(Guid))
             || type.Equals(typeof(DateTime))
             || type.Equals(typeof(decimal));
+    }
+    public void SetMetadata(string method, string path, Action<RouteMetadata> configure)
+    {
+        var key = (method.ToUpperInvariant(), path);
+        if (!_routeMetadata.ContainsKey(key))
+            _routeMetadata[key] = new RouteMetadata();
+
+        configure(_routeMetadata[key]);
     }
 }

@@ -15,6 +15,7 @@ public class LiteHttpContext
     public HttpListenerRequest RawRequest { get; }
     public HttpListenerResponse RawResponse { get; }
     public Response? Response { get; set; }
+    public RouteMetadata RouteMetadata { get; set; } = new();
 
     public LiteHttpContext(HttpListenerContext context, Dictionary<string, string>? routeParams = null)
     {
