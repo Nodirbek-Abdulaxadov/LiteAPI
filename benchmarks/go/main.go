@@ -1,13 +1,10 @@
 package main
 
 import (
-	"bufio"
-	"encoding/json"
-	"fmt"
 	"math/rand"
-	"net"
-	"strings"
 	"time"
+
+	"github.com/gofiber/fiber/v2"
 )
 
 var summaries = []string{
@@ -23,48 +20,18 @@ type WeatherForecast struct {
 }
 
 func main() {
-	listener, err := net.Listen("tcp", "127.0.0.1:7055")
-	if err != nil {
-		panic(err)
-	}
-	defer listener.Close()
+	app := fiber.New(fiber.Config{
+		Prefork:               false,
+		DisableStartupMessage: true,
+	})
 
-	fmt.Println("LiteAPI-Go-TcpServer: http://localhost:7055")
-
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			fmt.Println("Accept error:", err)
-			continue
-		}
-		go handleConnection(conn)
-	}
-}
-
-func handleConnection(conn net.Conn) {
-	defer conn.Close()
-
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	reader := bufio.NewReader(conn)
-
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		fmt.Println("Read error:", err)
-		return
-	}
-
-	if !strings.HasPrefix(line, "GET ") {
-		return
-	}
-
-	var response []byte
-	status := "200 OK"
-
-	if strings.Contains(line, "/weatherforecast") {
-		forecasts := make([]WeatherForecast, 500)
+	app.Get("/weatherforecast", func(c *fiber.Ctx) error {
+		const forecastCount = 50
+		forecasts := make([]WeatherForecast, forecastCount)
 		now := time.Now()
-		for i := 0; i < 500; i++ {
-			tempC := rand.Intn(75) - 20
+
+		for i := 0; i < forecastCount; i++ {
+			tempC := rand.Intn(75) - 20 // [-20, 54]
 			forecasts[i] = WeatherForecast{
 				Date:         now.AddDate(0, 0, i+1).Format("2006-01-02"),
 				TemperatureC: tempC,
@@ -72,15 +39,18 @@ func handleConnection(conn net.Conn) {
 				Summary:      summaries[rand.Intn(len(summaries))],
 			}
 		}
-		response, _ = json.Marshal(forecasts)
-	} else {
-		status = "404 Not Found"
-		response = []byte(`{"error":"Not found"}`)
+
+		return c.JSON(forecasts)
+	})
+
+	app.Use(func(c *fiber.Ctx) error {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "Not found",
+		})
+	})
+
+	println("Fiber server running on http://localhost:7055")
+	if err := app.Listen("127.0.0.1:7055"); err != nil {
+		panic(err)
 	}
-
-	header := fmt.Sprintf("HTTP/1.1 %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n",
-		status, len(response))
-
-	conn.Write([]byte(header))
-	conn.Write(response)
 }

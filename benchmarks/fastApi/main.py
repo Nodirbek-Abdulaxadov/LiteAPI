@@ -27,6 +27,6 @@ def get_weather_forecast():
             date=date.today() + timedelta(days=i),
             temperatureC=random.randint(-20, 35),
             summary=random.choice(summaries)
-        ) for i in range(1, 6)
+        ) for i in range(1, 51)
     ]
     return forecast
