@@ -692,3 +692,4 @@ appsettings.*.json
 Network Trash Folder
 Temporary Items
 .apdisk
+benchmarks/rust/target

@@ -1,8 +1,16 @@
-﻿public class Response
+public class Response
 {
     public int StatusCode { get; set; } = 200;
     public string ContentType { get; set; } = "text/plain";
     public byte[] Body { get; set; } = [];
+
+    public string GetBodyAsString()
+    {
+        if (Body == null || Body.Length == 0)
+            return string.Empty;
+
+        return Encoding.UTF8.GetString(Body);
+    }
 
     private static byte[] Encode(string text) => Encoding.UTF8.GetBytes(text);
     private static byte[] EncodeJson(object obj)

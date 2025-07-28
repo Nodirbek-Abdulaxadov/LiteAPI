@@ -1,0 +1,1 @@
+﻿public delegate Response RequestHandler(HttpListenerRequest request);

@@ -1,0 +1,10 @@
+﻿global using System.Collections.Concurrent;
+global using System.IO.Compression;
+global using System.Net;
+global using System.Runtime.CompilerServices;
+global using System.Text.Json;
+global using System.Web;
+global using System.Text;
+global using System.Collections.Specialized;
+global using System.Globalization;
+global using System.Reflection;
