@@ -9,7 +9,7 @@
 
 
   <ItemGroup>
-    <ProjectReference Include="..\..\LiteAPI\LiteAPI.csproj" />
+	  <PackageReference Include="LiteAPI.Core" Version="1.1.1" />
   </ItemGroup>
 
 </Project>

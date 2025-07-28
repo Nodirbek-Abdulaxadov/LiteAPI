@@ -4,9 +4,13 @@ VisualStudioVersion = 17.5.2.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebApplication1", "cs_controller\WebApplication1.csproj", "{9277A60C-FB62-1280-2C9E-AD142866C5FA}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "lite", "cs_lite\lite.csproj", "{BD83EF7F-DE1D-E0BE-EFC5-A70FF25BF03A}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebApplication2", "cs_minimalApi\WebApplication2.csproj", "{3A6FC88F-1BD2-9747-AE49-9C97B00D0552}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "testApi", "liteApi\testApi.csproj", "{8A784FBF-3A56-2518-DB57-B866DCEE8B73}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LiteAPI", "Lab\LiteAPI\LiteAPI.csproj", "{090AD582-B28E-51C5-639D-F71CD05F1F45}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TesLitetAPI", "Lab\TesLitetAPI\TesLitetAPI.csproj", "{80E5BD49-5A5E-D666-4406-F259A0084288}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -18,14 +22,22 @@ Global
 		{9277A60C-FB62-1280-2C9E-AD142866C5FA}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{9277A60C-FB62-1280-2C9E-AD142866C5FA}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{9277A60C-FB62-1280-2C9E-AD142866C5FA}.Release|Any CPU.Build.0 = Release|Any CPU
-		{BD83EF7F-DE1D-E0BE-EFC5-A70FF25BF03A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{BD83EF7F-DE1D-E0BE-EFC5-A70FF25BF03A}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{BD83EF7F-DE1D-E0BE-EFC5-A70FF25BF03A}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{BD83EF7F-DE1D-E0BE-EFC5-A70FF25BF03A}.Release|Any CPU.Build.0 = Release|Any CPU
 		{3A6FC88F-1BD2-9747-AE49-9C97B00D0552}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{3A6FC88F-1BD2-9747-AE49-9C97B00D0552}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3A6FC88F-1BD2-9747-AE49-9C97B00D0552}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3A6FC88F-1BD2-9747-AE49-9C97B00D0552}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8A784FBF-3A56-2518-DB57-B866DCEE8B73}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8A784FBF-3A56-2518-DB57-B866DCEE8B73}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8A784FBF-3A56-2518-DB57-B866DCEE8B73}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8A784FBF-3A56-2518-DB57-B866DCEE8B73}.Release|Any CPU.Build.0 = Release|Any CPU
+		{090AD582-B28E-51C5-639D-F71CD05F1F45}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{090AD582-B28E-51C5-639D-F71CD05F1F45}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{090AD582-B28E-51C5-639D-F71CD05F1F45}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{090AD582-B28E-51C5-639D-F71CD05F1F45}.Release|Any CPU.Build.0 = Release|Any CPU
+		{80E5BD49-5A5E-D666-4406-F259A0084288}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{80E5BD49-5A5E-D666-4406-F259A0084288}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{80E5BD49-5A5E-D666-4406-F259A0084288}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{80E5BD49-5A5E-D666-4406-F259A0084288}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
