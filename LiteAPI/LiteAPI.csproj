@@ -38,4 +38,13 @@
 		</None>
 	</ItemGroup>
 
+	<ItemGroup>
+	  <None Remove="liteapi_rust.dll" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Content Include="liteapi_rust.dll">
+	    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+	  </Content>
+	</ItemGroup>
 </Project>

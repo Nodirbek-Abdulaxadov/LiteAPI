@@ -234,6 +234,66 @@ public class Router
 
         return Response.NotFound();
     }
+
+    public Response HandleRawRequest(string method, string path, string? body)
+    {
+        method = method.ToUpperInvariant();
+
+        foreach (var route in routes)
+        {
+            var (routeMethod, routePath) = route.Key;
+            if (routeMethod != method) continue;
+
+            if (TryMatchRoute(path, routePath, out var routeParams))
+            {
+                var routeDefinition = route.Value;
+                var parameters = routeDefinition.Handler.Method.GetParameters();
+                var args = new object?[parameters.Length];
+
+                for (int i = 0; i < parameters.Length; i++)
+                {
+                    var param = parameters[i];
+                    var paramName = param.Name!;
+
+                    if (param.ParameterType == typeof(string) && parameters.Length == 1 && routeParams.Count == 0)
+                    {
+                        // Body ni string sifatida berish
+                        args[i] = body;
+                    }
+                    else if (routeParams.TryGetValue(paramName, out var value))
+                    {
+                        args[i] = Convert.ChangeType(value, param.ParameterType, CultureInfo.InvariantCulture);
+                    }
+                    else
+                    {
+                        args[i] = GetDefault(param.ParameterType);
+                    }
+                }
+
+                try
+                {
+                    var result = routeDefinition.Handler.DynamicInvoke(args);
+
+                    if (result is Response r)
+                        return r;
+
+                    if (result is string s)
+                        return Response.Ok(s); // avtomatik o‘rash
+
+                    if (result is Task<Response> taskResp)
+                        return taskResp.GetAwaiter().GetResult();
+
+                    return Response.BadRequest("Handler did not return a valid Response");
+                }
+                catch (Exception ex)
+                {
+                    return Response.BadRequest(ex.InnerException?.Message ?? ex.Message);
+                }
+            }
+        }
+
+        return Response.NotFound();
+    }
     private static bool TryMatchRoute(string requestPath, string routePath, out Dictionary<string, string> parameters)
     {
         parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

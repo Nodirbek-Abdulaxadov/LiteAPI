@@ -43,7 +43,7 @@ public class LiteWebApplication(
     public void Use<T>() where T : ILiteMiddleware, new()
     {
         var instance = new T();
-        _middlewares.Add(async (ctx, next) => await instance.InvokeAsync(ctx, next));
+        _middlewares.Add(instance.InvokeAsync);
     }
 
     public void Run()
@@ -52,7 +52,7 @@ public class LiteWebApplication(
             _listener.Prefixes.Add(url.EndsWith('/') ? url : url + "/");
 
         _listener.Start();
-        Console.WriteLine($"LiteAPI running on: {string.Join(", ", urls)}");
+        Console.WriteLine($"LiteAPI.cs running on: {string.Join(", ", urls)}");
 
         while (true)
         {
@@ -92,5 +92,11 @@ public class LiteWebApplication(
                 }
             });
         }
+    }
+
+    public void RunWithRust()
+    {
+        Console.WriteLine("Running LiteAPI using embedded Rust TCP listener...");
+        RustBridge.StartRustListener(router); // marshrutlaydi: method + path + body
     }
 }
