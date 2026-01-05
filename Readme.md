@@ -1,72 +1,47 @@
-﻿# 🚀 LiteAPI
+﻿# LiteAPI
 
-A **minimal, dependency-free C# micro web framework** for building **lightweight REST APIs, dashboards, internal tools, and microservices** without the complexity of heavy frameworks.
+LiteAPI is a minimal, dependency-free C# micro web framework for building lightweight REST APIs, internal tools, and small services with a simple middleware pipeline, routing, and binding.
 
----
+## Installation
 
-## 📦 Installation
-
-Install via **NuGet**:
+NuGet:
 
 ```bash
-dotnet add package LiteAPI.Core --version 1.1.1
+dotnet add package LiteAPI.Core
 ```
 
-Or via **Package Manager**:
+Package Manager:
 
 ```powershell
-Install-Package LiteAPI.Core -Version 1.1.1
+Install-Package LiteAPI.Core
 ```
 
-Ready for **.NET 6, 7, 8, 9 LTS**.
+Requirements: **.NET 9.0** (the package currently targets `net9.0`).
 
----
+## Features
 
-## ✨ Features
+- Signature-based routing with route params (including trailing wildcard `{*path}`)
+- Binding: `[FromBody]`, `[FromForm]`, `[FromQuery]`, `[FromRoute]`
+- Middleware pipeline (logging, CORS, auth/authz, compression, rate limiting, etc.)
+- Authentication (API key / Bearer token) + Authorization (roles + policies)
+- Static file serving (`app.MapStaticFiles()`)
+- OpenAPI generation (`app.UseOpenApi()`)
+- Production hardening defaults:
+  - Concurrency limiting (`MaxConcurrentRequests`)
+  - Request body size limit with **413 Payload Too Large** (`MaxRequestBodyBytes`)
+  - Request body is read at most once for binding
+- Observability helpers:
+  - `X-Request-Id` (`app.UseRequestId()`)
+  - Minimal metrics (`app.UseMetrics()`)
+  - Health endpoint (`app.MapHealthz()`)
 
-✅ **Zero dependencies** – fully standalone, tiny, fast.
-
-✅ **JSON + text responses out of the box**.
-
-✅ **Lightweight DI container** (Singleton, Scoped, Transient).
-
-✅ **Signature-based routing with parameter extraction**.
-
-✅ **Automatic model binding:**
-
-* `[FromBody]`, `[FromForm]`, `[FromQuery]`, `[FromRoute]`.
-
-
-✅ **Async/await handler support**.
-
-✅ **Middleware pipeline** (`app.UseLogging()`, `app.UseCors()`, etc).
-
-✅ **Authentication & Authorization**:
-
-* API Key, Bearer Token auth.
-* Policy and role-based route protection.
-
-✅ **Route grouping for modular structure**.
-
-✅ **Static file serving** (`app.MapStaticFiles()`).
-
-✅ **Optional OpenAPI (Swagger) generation** for testing endpoints.
-
-✅ **Launch browser on startup** for local dashboards.
-
-✅ **Clean, readable structure with intuitive extension methods**.
-
-✅ **No black-box magic, easy to learn and extend**.
-
----
-
-## 🚀 Quick Example
+## Quick start
 
 ```csharp
 using LiteAPI;
+using LiteAPI.Features.Auth;
 
 var builder = LiteWebApplication.CreateBuilder(args);
-builder.Configure<MyConfiguration>();
 
 builder.AddAuthentication(auth =>
 {
@@ -81,139 +56,83 @@ builder.AddAuthorization(authz =>
 });
 
 var app = builder.Build();
+
 app.UseLogging();
+app.UseRequestId();
+app.UseMetrics();
+app.MapHealthz();
+
+app.UseRateLimiting(maxRequests: 20, perSeconds: 10, perIp: true);
+app.UseCompression(minBytes: 512);
+
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.Get("/", ctx => Response.Ok("Welcome to LiteAPI 🚀"));
+app.Get("/", () => Response.Ok("Hello from LiteAPI"))
+   .AllowAnonymous();
 
-app.Get("/api/users/{id}", (HttpListenerRequest req, [FromRoute] int id) =>
-{
-    var userService = req.GetService<UserService>();
-    var user = userService.GetById(id);
-    return user != null ? Response.OkJson(user) : Response.NotFound();
-}).RequireRoles("Admin");
+app.Get("/api/users/{id}", ([FromRoute] int id) =>
+    Response.OkJson(new { id }))
+   .RequireRoles("Admin");
 
-app.Post("/api/users", (HttpListenerRequest req, [FromBody] UserDto user) =>
-{
-    var userService = req.GetService<UserService>();
-    var created = userService.Add(user);
-    return Response.Created($"/api/users/{created.Id}", created);
-});
+app.Post("/echo", ([FromBody] EchoDto dto) => Response.OkJson(dto));
 
-app.Run();
-```
-
----
-
-## 🛠️ Advanced Usage
-
-✅ **Dependency Injection:**
-
-```csharp
-builder.Services.AddSingleton<UserService>();
-```
-
-✅ **Query parsing:**
-
-```csharp
-app.Get("/api/items", (HttpListenerRequest req, [FromQuery] QueryParams query) =>
-{
-    var items = ItemService.GetPaged(query.Page, query.PageSize, query.Search);
-    return Response.OkJson(items);
-});
-```
-
-✅ **Route grouping:**
-
-```csharp
-app.MapGroup<UsersRoutes>("/api/users");
-```
-
-✅ **Middleware pipeline:**
-
-```csharp
-app.UseLogging();
-app.UseCors();
-app.UseExceptionHandling();
-```
-
-✅ **Async handlers:**
-
-```csharp
-app.Get("/delay", async ctx =>
-{
-    await Task.Delay(1000);
-    return Response.Ok("Done!");
-});
-```
-
-✅ **Static files:**
-
-```csharp
 app.MapStaticFiles();
+
+var options = new LiteServerOptions
+{
+    MaxConcurrentRequests = 128,
+    MaxRequestBodyBytes = 64 * 1024
+};
+
+// Managed hosting (HttpListener)
+// app.Run(options);
+
+// Rust TCP listener hosting (same middleware/router pipeline)
+app.RunWithRust(options);
+
+public record EchoDto(string Message);
 ```
 
-✅ **OpenAPI (Swagger):**
+## Hosting modes
 
-```csharp
-app.UseOpenApi();
-```
+LiteAPI can run in two modes:
 
----
+- **Managed (default):** `app.Run(...)` uses `HttpListener`.
+- **Rust listener:** `app.RunWithRust(...)` uses an embedded Rust TCP listener that parses HTTP, calls into the same managed middleware/router pipeline, then returns a full HTTP response.
 
-## 🪐 Roadmap
+### Cross-platform native packaging
 
-✅ Middleware pipeline
+The NuGet package can ship the Rust native library under `runtimes/<rid>/native/` (CI/release builds).
+Currently supported RIDs:
 
-✅ Auth & policy-based authorization
+- `win-x64`, `win-arm64`
+- `linux-x64`, `linux-arm64`
+- `osx-x64`, `osx-arm64`
 
-✅ OpenAPI (Swagger) support
+## Handler parameter guidelines (important)
 
-✅ Route grouping & parameter binding
+- Prefer **host-independent** handler signatures (works for both managed and Rust modes):
+  - primitives + `[FromRoute]` / `[FromQuery]`
+  - DTOs via `[FromBody]` / `[FromForm]`
+  - `LiteAPI.Http.LiteRequest` if you need headers/query/body stream
+- `HttpListenerRequest` is **only available in managed mode**; in Rust mode it is not present.
 
-✅ Static file serving
+## Contributing / building native locally
 
-✅ Async pipeline
+To build and copy the Rust native library into the correct `runtimes/<rid>/native/` folder:
 
-✅ Lightweight DI
+- Windows: `powershell -File scripts/build-rust-native.ps1 -Rid win-x64`
+- Linux/macOS: `bash scripts/build-rust-native.sh linux-x64` (or `osx-arm64`, etc.)
 
-✅ Rate limiting middleware
+## Roadmap
 
-**Next planned:**
+Next planned (high-level):
 
-* Caching middleware.
-* Request validation extensions.
-* CLI scaffolding for generating LiteAPI projects quickly.
+- Caching middleware
+- Request validation extensions
+- CLI scaffolding for generating LiteAPI projects
 
----
-
-## 🤝 Contributing
-
-Pull requests and discussions are welcome!
-
-✅ Add examples
-
-✅ Improve documentation
-
-✅ Suggest advanced DI features
-
----
-
-## 🪐 License
+## License
 
 MIT License.
-
----
-
-## ✉️ Contact
-
-**Author:** [@nbkabdulaxadov](https://t.me/nbkabdulaxadov) on Telegram
-
-**Email:** [nbkabdulakhadov@gmail.com](mailto:nbkabdulakhadov@gmail.com)
-
----
-
-**Start building clean, fast, lightweight APIs with LiteAPI today 🚀!**
-
----

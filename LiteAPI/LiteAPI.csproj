@@ -16,7 +16,7 @@
 		<PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
 		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
 		<PackageReadmeFile>Readme.md</PackageReadmeFile>
-		<Version>1.1.2</Version>
+		<Version>1.1.3</Version>
 		<RootNamespace>LiteAPI</RootNamespace>
 		<NoWarn>$(NoWarn);CA1050</NoWarn>
 		<NoWarn>$(NoWarn);IDE0130</NoWarn>
