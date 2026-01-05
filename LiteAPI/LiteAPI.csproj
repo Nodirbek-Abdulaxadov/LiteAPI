@@ -16,7 +16,6 @@
 		<PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
 		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
 		<PackageReadmeFile>Readme.md</PackageReadmeFile>
-		<PackageIcon>5e06e330-c610-4a40-935b-7b7ec75d9429 1 (2).png</PackageIcon>
 		<Version>1.1.2</Version>
 		<RootNamespace>LiteAPI</RootNamespace>
 		<NoWarn>$(NoWarn);CA1050</NoWarn>
@@ -25,10 +24,6 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<None Include="..\..\..\..\Downloads\5e06e330-c610-4a40-935b-7b7ec75d9429 1 (2).png">
-			<Pack>True</Pack>
-			<PackagePath>\</PackagePath>
-		</None>
 		<None Include="..\LICENSE.txt">
 			<Pack>True</Pack>
 			<PackagePath>\</PackagePath>
@@ -40,9 +35,56 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<None Include="liteapi_rust\target\release\deps\liteapi_rust.dll">
-			<Link>liteapi_rust.dll</Link>
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</None>
+		<!-- Native assets for NuGet (built by scripts/CI into these folders) -->
+		<None Include="runtimes\win-x64\native\liteapi_rust.dll" Condition="Exists('runtimes\win-x64\native\liteapi_rust.dll')" Pack="true" PackagePath="runtimes/win-x64/native/" />
+		<None Include="runtimes\win-arm64\native\liteapi_rust.dll" Condition="Exists('runtimes\win-arm64\native\liteapi_rust.dll')" Pack="true" PackagePath="runtimes/win-arm64/native/" />
+		<None Include="runtimes\linux-x64\native\libliteapi_rust.so" Condition="Exists('runtimes\linux-x64\native\libliteapi_rust.so')" Pack="true" PackagePath="runtimes/linux-x64/native/" />
+		<None Include="runtimes\linux-arm64\native\libliteapi_rust.so" Condition="Exists('runtimes\linux-arm64\native\libliteapi_rust.so')" Pack="true" PackagePath="runtimes/linux-arm64/native/" />
+		<None Include="runtimes\osx-x64\native\libliteapi_rust.dylib" Condition="Exists('runtimes\osx-x64\native\libliteapi_rust.dylib')" Pack="true" PackagePath="runtimes/osx-x64/native/" />
+		<None Include="runtimes\osx-arm64\native\libliteapi_rust.dylib" Condition="Exists('runtimes\osx-arm64\native\libliteapi_rust.dylib')" Pack="true" PackagePath="runtimes/osx-arm64/native/" />
 	</ItemGroup>
+
+	<Target Name="CopyRustNativeToRuntimes" BeforeTargets="Build;Pack">
+		<PropertyGroup>
+			<RustReleaseDir>$(MSBuildProjectDirectory)\liteapi_rust\target\release</RustReleaseDir>
+			<RustReleaseDepsDir>$(RustReleaseDir)\deps</RustReleaseDepsDir>
+		</PropertyGroup>
+
+		<ItemGroup Condition="'$(OS)' == 'Windows_NT'">
+			<_RustWinDll Include="$(RustReleaseDepsDir)\liteapi_rust.dll" />
+			<_RustWinDll Include="$(RustReleaseDir)\liteapi_rust.dll" Condition="!Exists('$(RustReleaseDepsDir)\liteapi_rust.dll')" />
+		</ItemGroup>
+		<Copy Condition="'$(OS)' == 'Windows_NT' and Exists('%(_RustWinDll.Identity)')"
+			SourceFiles="%(_RustWinDll.Identity)"
+			DestinationFiles="$(MSBuildProjectDirectory)\runtimes\win-x64\native\liteapi_rust.dll"
+			SkipUnchangedFiles="true" />
+
+		<Copy Condition="'$(OS)' != 'Windows_NT' and Exists('$(RustReleaseDir)\libliteapi_rust.so')"
+			SourceFiles="$(RustReleaseDir)\libliteapi_rust.so"
+			DestinationFiles="$(MSBuildProjectDirectory)\runtimes\linux-x64\native\libliteapi_rust.so"
+			SkipUnchangedFiles="true" />
+
+		<Copy Condition="'$(OS)' != 'Windows_NT' and Exists('$(RustReleaseDir)\libliteapi_rust.dylib')"
+			SourceFiles="$(RustReleaseDir)\libliteapi_rust.dylib"
+			DestinationFiles="$(MSBuildProjectDirectory)\runtimes\osx-x64\native\libliteapi_rust.dylib"
+			SkipUnchangedFiles="true" />
+	</Target>
+
+	<Target Name="CopyRustNativeToOutput" AfterTargets="Build">
+		<!-- Project-reference friendliness: ensure the native library is present next to LiteAPI.dll -->
+		<Copy Condition="'$(OS)' == 'Windows_NT' and Exists('$(MSBuildProjectDirectory)\runtimes\win-x64\native\liteapi_rust.dll')"
+			SourceFiles="$(MSBuildProjectDirectory)\runtimes\win-x64\native\liteapi_rust.dll"
+			DestinationFiles="$(TargetDir)\liteapi_rust.dll"
+			SkipUnchangedFiles="true" />
+
+		<Copy Condition="'$(OS)' != 'Windows_NT' and Exists('$(MSBuildProjectDirectory)\runtimes\linux-x64\native\libliteapi_rust.so')"
+			SourceFiles="$(MSBuildProjectDirectory)\runtimes\linux-x64\native\libliteapi_rust.so"
+			DestinationFiles="$(TargetDir)\libliteapi_rust.so"
+			SkipUnchangedFiles="true" />
+
+		<Copy Condition="'$(OS)' != 'Windows_NT' and Exists('$(MSBuildProjectDirectory)\runtimes\osx-x64\native\libliteapi_rust.dylib')"
+			SourceFiles="$(MSBuildProjectDirectory)\runtimes\osx-x64\native\libliteapi_rust.dylib"
+			DestinationFiles="$(TargetDir)\libliteapi_rust.dylib"
+			SkipUnchangedFiles="true" />
+	</Target>
 </Project>
