@@ -55,20 +55,28 @@ jobs:
         if: runner.os == 'Linux' && matrix.rid == 'linux-arm64'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
       - name: Build (release)
         working-directory: LiteAPI/liteapi_rust
         shell: bash
         run: |
           set -euo pipefail
+
+          # For linux-arm64 we must explicitly use the aarch64 linker.
+          if [[ "${{ matrix.rid }}" == "linux-arm64" ]]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+            export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+            export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
+          fi
+
           cargo build --release --target "${{ matrix.target }}"
 
       - name: Copy native into runtimes/
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$(dirname \"${{ matrix.dest_path }}\")"
+          mkdir -p "$(dirname "${{ matrix.dest_path }}")"
 
           # Windows puts the dll under deps
           if [[ "${{ matrix.rid }}" == win-* ]]; then
