@@ -116,14 +116,24 @@ jobs:
       - name: Download native artifacts
         uses: actions/download-artifact@v4
         with:
+          pattern: native-*
+          merge-multiple: false
           path: .native-artifacts
 
       - name: Place natives into runtimes/
         shell: bash
         run: |
           set -euo pipefail
-          shopt -s globstar
-          for f in .native-artifacts/native-*/LiteAPI/runtimes/**/native/*; do
+          shopt -s globstar nullglob
+
+          files=(.native-artifacts/native-*/LiteAPI/runtimes/**/native/*)
+          if (( ${#files[@]} == 0 )); then
+            echo "No native runtime files found under .native-artifacts. Downloaded artifacts:" >&2
+            find .native-artifacts -maxdepth 3 -type f -print >&2 || true
+            exit 1
+          fi
+
+          for f in "${files[@]}"; do
             dest="${f#.native-artifacts/native-*/}"
             mkdir -p "$(dirname "$dest")"
             cp "$f" "$dest"
