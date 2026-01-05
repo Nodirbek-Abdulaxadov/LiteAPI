@@ -25,6 +25,12 @@
                 return;
             }
 
+            if (ctx.RouteMetadata.AllowAnonymous)
+            {
+                await next();
+                return;
+            }
+
             bool isAuthenticated = false;
 
             if (options.DefaultScheme == AuthScheme.ApiKey &&

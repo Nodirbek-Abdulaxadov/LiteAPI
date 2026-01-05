@@ -63,14 +63,23 @@ public class LiteWebApplication(
             {
                 try
                 {
-                    var liteContext = context.GetContext();
+                    var request = context.Request;
+                    var method = request.HttpMethod.ToUpperInvariant();
+                    var path = request.Url!.AbsolutePath;
+
+                    router.TryResolve(method, path, out var matchedRoute, out var routeParams);
+
+                    var liteContext = context.GetContext(routeParams);
+                    liteContext.RouteMetadata = matchedRoute?.Metadata ?? new RouteMetadata { AllowAnonymous = true };
 
                     async Task ExecuteMiddleware(int index)
                     {
                         if (index < _middlewares.Count)
                             await _middlewares[index](liteContext, () => ExecuteMiddleware(index + 1));
                         else
-                            liteContext.Response = await router.RouteAsync(context.Request);
+                            liteContext.Response = matchedRoute is null
+                                ? Response.NotFound()
+                                : await router.InvokeAsync(matchedRoute, request, routeParams);
                     }
 
                     await ExecuteMiddleware(0);

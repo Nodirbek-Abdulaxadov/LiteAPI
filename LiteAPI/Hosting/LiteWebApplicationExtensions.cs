@@ -30,12 +30,13 @@ public static class LiteWebApplicationExtensions
         {
             var requestedPath = request.Url!.AbsolutePath.Trim('/');
 
+            requestedPath = Uri.UnescapeDataString(requestedPath);
+
             // Serve index.html for "/"
             if (string.IsNullOrEmpty(requestedPath))
                 requestedPath = "index.html";
 
-            var filePath = Path.Combine(Directory.GetCurrentDirectory(), root, requestedPath);
-            return ServeStaticFile(filePath);
+            return ServeStaticFile(root, requestedPath);
         });
     }
 
@@ -43,16 +44,19 @@ public static class LiteWebApplicationExtensions
     /// Reads a file from disk and returns it as a Response with correct Content-Type.
     /// Returns 404 if the file does not exist.
     /// </summary>
-    private static Response ServeStaticFile(string filePath)
+    private static Response ServeStaticFile(string root, string requestedPath)
     {
-        var parts = filePath.Split(Path.DirectorySeparatorChar);
-        //recombine the parts to ensure correct path handling
-        filePath = string.Join('/', parts);
+        var rootFullPath = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), root));
+        var safeRelativePath = requestedPath.Replace('/', Path.DirectorySeparatorChar);
+        var candidateFullPath = Path.GetFullPath(Path.Combine(rootFullPath, safeRelativePath));
 
-        if (!File.Exists(filePath))
+        if (!candidateFullPath.StartsWith(rootFullPath, StringComparison.OrdinalIgnoreCase))
             return Response.NotFound();
 
-        var contentType = Path.GetExtension(filePath).ToLowerInvariant() switch
+        if (!File.Exists(candidateFullPath))
+            return Response.NotFound();
+
+        var contentType = Path.GetExtension(candidateFullPath).ToLowerInvariant() switch
         {
             ".html" => "text/html",
             ".css" => "text/css",
@@ -66,7 +70,7 @@ public static class LiteWebApplicationExtensions
             _ => "application/octet-stream"
         };
 
-        var fileBytes = File.ReadAllBytes(filePath);
+        var fileBytes = File.ReadAllBytes(candidateFullPath);
 
         return new Response
         {
