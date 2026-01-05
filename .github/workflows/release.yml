@@ -124,20 +124,42 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          shopt -s globstar nullglob
 
-          files=(.native-artifacts/native-*/LiteAPI/runtimes/**/native/*)
-          if (( ${#files[@]} == 0 )); then
-            echo "No native runtime files found under .native-artifacts. Downloaded artifacts:" >&2
+          # download-artifact stores files under:
+          #   .native-artifacts/native-<rid>/<file>
+          # We must place them into:
+          #   LiteAPI/runtimes/<rid>/native/<file>
+          declare -a rids=(
+            win-x64 win-arm64
+            linux-x64 linux-arm64
+            osx-x64 osx-arm64
+          )
+
+          placed=0
+          for rid in "${rids[@]}"; do
+            case "$rid" in
+              win-*) file="liteapi_rust.dll";;
+              linux-*) file="libliteapi_rust.so";;
+              osx-*) file="libliteapi_rust.dylib";;
+              *) echo "Unknown rid: $rid" >&2; exit 1;;
+            esac
+
+            src=".native-artifacts/native-${rid}/${file}"
+            dest="LiteAPI/runtimes/${rid}/native/${file}"
+            if [[ -f "$src" ]]; then
+              mkdir -p "$(dirname "$dest")"
+              cp "$src" "$dest"
+              placed=$((placed+1))
+            else
+              echo "Missing native artifact: $src" >&2
+            fi
+          done
+
+          if [[ "$placed" -eq 0 ]]; then
+            echo "No native runtime files were placed. Downloaded artifacts:" >&2
             find .native-artifacts -maxdepth 3 -type f -print >&2 || true
             exit 1
           fi
-
-          for f in "${files[@]}"; do
-            dest="${f#.native-artifacts/native-*/}"
-            mkdir -p "$(dirname "$dest")"
-            cp "$f" "$dest"
-          done
 
       - name: Restore
         run: dotnet restore "./LiteAPI.sln"
