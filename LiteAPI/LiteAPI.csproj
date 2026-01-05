@@ -4,6 +4,7 @@
 		<TargetFramework>net9.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<PackageId>LiteAPI.Core</PackageId>
 		<Title>LiteAPI – Minimal C# Micro Web Framework</Title>
 		<Authors>Nodirbek Abdulakhadov</Authors>
@@ -39,12 +40,9 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <None Remove="liteapi_rust.dll" />
-	</ItemGroup>
-
-	<ItemGroup>
-	  <Content Include="liteapi_rust.dll">
-	    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-	  </Content>
+		<None Include="liteapi_rust\target\release\deps\liteapi_rust.dll">
+			<Link>liteapi_rust.dll</Link>
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
 	</ItemGroup>
 </Project>

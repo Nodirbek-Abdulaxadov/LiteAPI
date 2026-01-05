@@ -22,11 +22,11 @@
 
             if (allowOrigin != null)
             {
-                ctx.RawResponse.Headers["Access-Control-Allow-Origin"] = allowOrigin;
-                ctx.RawResponse.Headers["Access-Control-Allow-Methods"] = builder.AllowedMethods;
-                ctx.RawResponse.Headers["Access-Control-Allow-Headers"] = builder.AllowedHeaders;
+                ctx.SetResponseHeader("Access-Control-Allow-Origin", allowOrigin);
+                ctx.SetResponseHeader("Access-Control-Allow-Methods", builder.AllowedMethods);
+                ctx.SetResponseHeader("Access-Control-Allow-Headers", builder.AllowedHeaders);
                 if (builder.AllowCredentialsFlag)
-                    ctx.RawResponse.Headers["Access-Control-Allow-Credentials"] = "true";
+                    ctx.SetResponseHeader("Access-Control-Allow-Credentials", "true");
             }
 
             if (ctx.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))

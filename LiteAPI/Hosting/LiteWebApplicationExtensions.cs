@@ -26,9 +26,9 @@ public static class LiteWebApplicationExtensions
     /// </summary>
     public static void MapStaticFiles(this LiteWebApplication app, string root = "wwwroot")
     {
-        app.Get("/{*path}", request =>
+        app.Get("/{*path}", (LiteAPI.Http.LiteRequest request) =>
         {
-            var requestedPath = request.Url!.AbsolutePath.Trim('/');
+            var requestedPath = request.Path.Trim('/');
 
             requestedPath = Uri.UnescapeDataString(requestedPath);
 

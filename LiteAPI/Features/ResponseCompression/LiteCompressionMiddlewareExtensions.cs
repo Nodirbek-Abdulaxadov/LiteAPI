@@ -13,7 +13,7 @@
                 if (response != null && response.Body.Length >= minBytes)
                 {
                     // Avoid double compression
-                    if (!string.IsNullOrEmpty(ctx.RawResponse.Headers["Content-Encoding"]))
+                    if (ctx.ResponseHeaders.TryGetValue("Content-Encoding", out var existing) && !string.IsNullOrWhiteSpace(existing))
                         return;
 
                     // Only compress "compressible" content types
@@ -27,9 +27,8 @@
                         gzip.Write(response.Body, 0, response.Body.Length);
                     }
 
-                    ctx.RawResponse.Headers["Content-Encoding"] = "gzip";
-                    ctx.RawResponse.Headers["Content-Type"] = response.ContentType ?? "application/octet-stream";
-                    ctx.RawResponse.Headers["Content-Length"] = output.Length.ToString();
+                    ctx.SetResponseHeader("Content-Encoding", "gzip");
+                    ctx.SetResponseHeader("Content-Type", response.ContentType ?? "application/octet-stream");
 
                     ctx.Response = new Response
                     {

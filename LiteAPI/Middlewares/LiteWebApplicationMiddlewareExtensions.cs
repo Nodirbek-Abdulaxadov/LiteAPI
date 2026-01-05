@@ -17,9 +17,9 @@
     {
         app.Use(async (ctx, next) =>
         {
-            ctx.RawResponse.Headers["Access-Control-Allow-Origin"] = allowOrigin;
-            ctx.RawResponse.Headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS";
-            ctx.RawResponse.Headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization";
+            ctx.SetResponseHeader("Access-Control-Allow-Origin", allowOrigin);
+            ctx.SetResponseHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            ctx.SetResponseHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
             if (ctx.Method == "OPTIONS")
             {
@@ -37,7 +37,7 @@
     {
         app.Use(async (ctx, next) =>
         {
-            ctx.RawResponse.Headers["X-Powered-By"] = poweredBy;
+            ctx.SetResponseHeader("X-Powered-By", poweredBy);
             await next();
         });
         return app;

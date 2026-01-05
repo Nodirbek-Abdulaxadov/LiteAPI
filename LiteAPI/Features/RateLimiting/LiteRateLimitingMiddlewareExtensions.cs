@@ -13,7 +13,7 @@
 
         app.Use(async (ctx, next) =>
         {
-            var key = perIp ? ctx.RawRequest.RemoteEndPoint?.Address.ToString() ?? "unknown" : "global";
+            var key = perIp ? (ctx.RemoteIp ?? "unknown") : "global";
             var now = DateTime.UtcNow;
 
             // Periodic cleanup to avoid unbounded memory growth.

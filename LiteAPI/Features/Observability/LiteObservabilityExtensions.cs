@@ -18,7 +18,7 @@ public static class LiteObservabilityExtensions
                     ? incoming
                     : Guid.NewGuid().ToString("n");
 
-            ctx.RawResponse.Headers[headerName] = ctx.TraceId;
+            ctx.SetResponseHeader(headerName, ctx.TraceId);
             await next();
         });
 

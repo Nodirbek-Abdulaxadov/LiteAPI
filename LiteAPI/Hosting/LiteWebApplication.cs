@@ -48,6 +48,26 @@ public class LiteWebApplication(
 
     public void Run() => Run(new LiteServerOptions());
 
+    internal async Task<Response> ProcessRequestAsync(
+        LiteHttpContext liteContext,
+        RouteDefinition? matchedRoute,
+        Dictionary<string, string> routeParams,
+        LiteServerOptions options)
+    {
+        async Task ExecuteMiddleware(int index)
+        {
+            if (index < _middlewares.Count)
+                await _middlewares[index](liteContext, () => ExecuteMiddleware(index + 1));
+            else
+                liteContext.Response = matchedRoute is null
+                    ? Response.NotFound()
+                    : await router.InvokeAsync(matchedRoute, liteContext.Request, routeParams, options.MaxRequestBodyBytes);
+        }
+
+        await ExecuteMiddleware(0);
+        return liteContext.Response ?? Response.NotFound();
+    }
+
     public void Run(LiteServerOptions options)
     {
         if (options is null)
@@ -98,21 +118,15 @@ public class LiteWebApplication(
                     var liteContext = context.GetContext(routeParams);
                     liteContext.RouteMetadata = matchedRoute?.Metadata ?? new RouteMetadata { AllowAnonymous = true };
 
-                    async Task ExecuteMiddleware(int index)
-                    {
-                        if (index < _middlewares.Count)
-                            await _middlewares[index](liteContext, () => ExecuteMiddleware(index + 1));
-                        else
-                            liteContext.Response = matchedRoute is null
-                                ? Response.NotFound()
-                                : await router.InvokeAsync(matchedRoute, request, routeParams, options.MaxRequestBodyBytes);
-                    }
+                    var response = await ProcessRequestAsync(liteContext, matchedRoute, routeParams, options);
 
-                    await ExecuteMiddleware(0);
-
-                    var response = liteContext.Response ?? Response.NotFound();
                     context.Response.StatusCode = response.StatusCode;
                     context.Response.ContentType = response.ContentType;
+
+                    // Copy any response headers written by middlewares/features
+                    foreach (var header in liteContext.ResponseHeaders)
+                        context.Response.Headers[header.Key] = header.Value;
+
                     context.Response.ContentLength64 = response.Body.Length;
                     context.Response.OutputStream.Write(response.Body, 0, response.Body.Length);
                 }
@@ -133,6 +147,12 @@ public class LiteWebApplication(
     public void RunWithRust()
     {
         Console.WriteLine("Running LiteAPI using embedded Rust TCP listener...");
-        RustBridge.StartRustListener(router); // marshrutlaydi: method + path + body
+        RunWithRust(new LiteServerOptions());
+    }
+
+    public void RunWithRust(LiteServerOptions options)
+    {
+        Console.WriteLine("Running LiteAPI using embedded Rust TCP listener...");
+        RustBridge.StartRustListener(this, options);
     }
 }

@@ -45,10 +45,12 @@ app.Get("/policy", () => Response.Ok("Policy AdminOnly passed"))
 
 app.MapStaticFiles();
 
-app.Run(new LiteServerOptions
+var options = new LiteServerOptions
 {
 	MaxConcurrentRequests = 128,
 	MaxRequestBodyBytes = 64 * 1024
-});
+};
+
+app.RunWithRust(options);
 
 public record EchoDto(string Message);
