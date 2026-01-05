@@ -115,6 +115,13 @@
         Body = Encoding.UTF8.GetBytes(message),
     };
 
+    public static Response PayloadTooLarge(string message = "Payload Too Large") => new()
+    {
+        StatusCode = 413,
+        ContentType = "text/plain",
+        Body = Encode(message)
+    };
+
     public static Response InternalServerError(string message = "Internal Server Error") => new()
     {
         StatusCode = 500,

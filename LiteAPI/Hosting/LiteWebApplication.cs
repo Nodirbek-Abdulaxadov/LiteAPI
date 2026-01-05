@@ -46,8 +46,18 @@ public class LiteWebApplication(
         _middlewares.Add(instance.InvokeAsync);
     }
 
-    public void Run()
+    public void Run() => Run(new LiteServerOptions());
+
+    public void Run(LiteServerOptions options)
     {
+        if (options is null)
+            throw new ArgumentNullException(nameof(options));
+
+        if (options.MaxConcurrentRequests <= 0)
+            throw new ArgumentOutOfRangeException(nameof(options.MaxConcurrentRequests), "Must be > 0.");
+
+        using var concurrency = new SemaphoreSlim(options.MaxConcurrentRequests, options.MaxConcurrentRequests);
+
         foreach (var url in urls)
             _listener.Prefixes.Add(url.EndsWith('/') ? url : url + "/");
 
@@ -59,11 +69,27 @@ public class LiteWebApplication(
             var context = _listener.GetContext();
             context.Request.SetServices(services);
 
+            // Backpressure: do not queue infinite tasks under load.
+            concurrency.Wait();
+
             _ = Task.Run(async () =>
             {
                 try
                 {
                     var request = context.Request;
+
+                    if (options.MaxRequestBodyBytes is long maxBytes
+                        && request.ContentLength64 > 0
+                        && request.ContentLength64 > maxBytes)
+                    {
+                        var tooLarge = Response.PayloadTooLarge($"Request body exceeds limit ({maxBytes} bytes).");
+                        context.Response.StatusCode = tooLarge.StatusCode;
+                        context.Response.ContentType = tooLarge.ContentType;
+                        context.Response.ContentLength64 = tooLarge.Body.Length;
+                        context.Response.OutputStream.Write(tooLarge.Body, 0, tooLarge.Body.Length);
+                        return;
+                    }
+
                     var method = request.HttpMethod.ToUpperInvariant();
                     var path = request.Url!.AbsolutePath;
 
@@ -79,7 +105,7 @@ public class LiteWebApplication(
                         else
                             liteContext.Response = matchedRoute is null
                                 ? Response.NotFound()
-                                : await router.InvokeAsync(matchedRoute, request, routeParams);
+                                : await router.InvokeAsync(matchedRoute, request, routeParams, options.MaxRequestBodyBytes);
                     }
 
                     await ExecuteMiddleware(0);
@@ -98,6 +124,7 @@ public class LiteWebApplication(
                 finally
                 {
                     context.Response.OutputStream.Close();
+                    concurrency.Release();
                 }
             });
         }

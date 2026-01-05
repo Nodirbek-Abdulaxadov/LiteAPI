@@ -1,5 +1,6 @@
 ﻿public class LiteHttpContext
 {
+    public string TraceId { get; set; } = string.Empty;
     public string Method { get; }
     public string Path { get; }
     public Dictionary<string, string> Headers { get; }
@@ -25,6 +26,12 @@
         Headers = RawRequest.Headers.AllKeys?
             .ToDictionary(k => k!, k => RawRequest.Headers[k!]!, StringComparer.OrdinalIgnoreCase)
             ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        TraceId = Headers.TryGetValue("X-Request-Id", out var incoming) && !string.IsNullOrWhiteSpace(incoming)
+            ? incoming
+            : Guid.NewGuid().ToString("n");
+
+        RawResponse.Headers["X-Request-Id"] = TraceId;
 
         Params = routeParams ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 

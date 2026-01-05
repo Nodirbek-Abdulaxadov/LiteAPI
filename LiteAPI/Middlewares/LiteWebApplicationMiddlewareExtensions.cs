@@ -5,10 +5,10 @@
         app.Use(async (ctx, next) =>
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            Console.WriteLine($"{ctx.Method} {ctx.Path}");
+            Console.WriteLine($"[{ctx.TraceId}] {ctx.Method} {ctx.Path}");
             await next();
             sw.Stop();
-            Console.WriteLine($"{ctx.Method} {ctx.Path} responded {ctx.Response?.StatusCode} in {sw.ElapsedMilliseconds}ms");
+            Console.WriteLine($"[{ctx.TraceId}] {ctx.Method} {ctx.Path} -> {ctx.Response?.StatusCode} in {sw.ElapsedMilliseconds}ms");
         });
         return app;
     }

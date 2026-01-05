@@ -82,7 +82,7 @@ public class Router
         return await InvokeAsync(route, request, routeParams);
     }
 
-    internal async Task<Response> InvokeAsync(RouteDefinition routeDefinition, HttpListenerRequest request, Dictionary<string, string> routeParams)
+    internal async Task<Response> InvokeAsync(RouteDefinition routeDefinition, HttpListenerRequest request, Dictionary<string, string> routeParams, long? maxBodyBytes = null)
     {
         var parameters = routeDefinition.Handler.Method.GetParameters();
         var args = new object?[parameters.Length];
@@ -110,11 +110,28 @@ public class Router
 
         if (parameters.Any(NeedsBodyFor))
         {
-            using var ms = new MemoryStream();
-            await request.InputStream.CopyToAsync(ms);
-            bodyBytes = ms.ToArray();
-            bodyText = Encoding.UTF8.GetString(bodyBytes);
-            bodyRead = true;
+            try
+            {
+                using var ms = new MemoryStream();
+                if (maxBodyBytes is long limit && limit > 0)
+                {
+                    await CopyToWithLimitAsync(request.InputStream, ms, limit);
+                }
+                else
+                {
+                    await request.InputStream.CopyToAsync(ms);
+                }
+
+                bodyBytes = ms.ToArray();
+                bodyText = Encoding.UTF8.GetString(bodyBytes);
+                bodyRead = true;
+            }
+            catch (PayloadTooLargeException)
+            {
+                return Response.PayloadTooLarge(maxBodyBytes is long limit
+                    ? $"Request body exceeds limit ({limit} bytes)."
+                    : "Payload Too Large");
+            }
 
             bodyBoundParamCount = parameters.Count(p =>
                 p.GetCustomAttribute<FromBodyAttribute>() != null
@@ -236,6 +253,30 @@ public class Router
         {
             // treat handler exceptions as 500, not 400
             return Response.InternalServerError(ex.InnerException?.Message ?? ex.Message);
+        }
+    }
+
+    private sealed class PayloadTooLargeException : Exception
+    {
+        public PayloadTooLargeException() { }
+    }
+
+    private static async Task CopyToWithLimitAsync(Stream input, Stream output, long maxBytes)
+    {
+        var buffer = new byte[81920];
+        long total = 0;
+
+        while (true)
+        {
+            var read = await input.ReadAsync(buffer, 0, buffer.Length);
+            if (read <= 0)
+                break;
+
+            total += read;
+            if (total > maxBytes)
+                throw new PayloadTooLargeException();
+
+            await output.WriteAsync(buffer, 0, read);
         }
     }
 
