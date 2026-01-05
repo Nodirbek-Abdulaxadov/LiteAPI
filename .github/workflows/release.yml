@@ -144,23 +144,25 @@ jobs:
     name: Push to NuGet
     needs: pack
     runs-on: ubuntu-latest
+    env:
+      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
 
     steps:
       - name: Skip (no NuGet key)
-        if: ${{ secrets.NUGET_API_KEY == '' }}
+        if: ${{ env.NUGET_API_KEY == '' }}
         run: echo "NUGET_API_KEY is not set; skipping NuGet push."
 
       - uses: actions/download-artifact@v4
-        if: ${{ secrets.NUGET_API_KEY != '' }}
+        if: ${{ env.NUGET_API_KEY != '' }}
         with:
           name: nupkg
           path: nupkg
 
       - uses: actions/setup-dotnet@v4
-        if: ${{ secrets.NUGET_API_KEY != '' }}
+        if: ${{ env.NUGET_API_KEY != '' }}
         with:
           dotnet-version: 9.0.x
 
       - name: Push
-        if: ${{ secrets.NUGET_API_KEY != '' }}
-        run: dotnet nuget push "nupkg/*.nupkg" --api-key "${{ secrets.NUGET_API_KEY }}" --source "https://api.nuget.org/v3/index.json" --skip-duplicate
+        if: ${{ env.NUGET_API_KEY != '' }}
+        run: dotnet nuget push "nupkg/*.nupkg" --api-key "$NUGET_API_KEY" --source "https://api.nuget.org/v3/index.json" --skip-duplicate
