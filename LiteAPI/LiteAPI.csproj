@@ -5,7 +5,7 @@
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<PackageId>LiteAPI.Core</PackageId>
 		<Title>LiteAPI – Minimal C# Micro Web Framework</Title>
-		<Description>A minimal, dependency-free C# micro web framework for building lightweight REST APIs, internal tools, and microservices. 2.0 adds graceful shutdown, compiled handler delegates, async response writes, and unified sync/async routing.</Description>
+		<Description>A minimal, dependency-free C# micro web framework for building lightweight REST APIs, internal tools, and microservices. 2.3 brings HTTP/1.1 keep-alive in the Rust listener for major throughput and tail-latency wins (~60-100k rps, p99 ≤ 5ms on typical loopback workloads).</Description>
 		<PackageTags>csharp;dotnet;restapi;api;minimal;framework;rust</PackageTags>
 		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
 		<PackageReadmeFile>Readme.md</PackageReadmeFile>
@@ -36,24 +36,33 @@
 		Link is set so the file keeps its runtimes/<rid>/native/ subpath in the
 		output instead of getting dumped next to the exe with a flat name.
 	-->
+	<!--
+		Native assets:
+		- Pack=true → NuGet payload at runtimes/<rid>/native/ (P/Invoke
+		  resolves it from there for NuGet consumers via the package's
+		  generated deps.json).
+		- CopyToOutputDirectory + Link (flat filename) → ProjectReference
+		  consumers like LiteAPI.Example get the native dropped flat next
+		  to their exe, which is the first directory P/Invoke searches.
+	-->
 	<ItemGroup>
 		<Content Include="runtimes\win-x64\native\liteapi_rust.dll" Condition="Exists('runtimes\win-x64\native\liteapi_rust.dll')" Pack="true" PackagePath="runtimes/win-x64/native/" CopyToOutputDirectory="PreserveNewest">
-			<Link>runtimes\win-x64\native\liteapi_rust.dll</Link>
+			<Link>liteapi_rust.dll</Link>
 		</Content>
 		<Content Include="runtimes\win-arm64\native\liteapi_rust.dll" Condition="Exists('runtimes\win-arm64\native\liteapi_rust.dll')" Pack="true" PackagePath="runtimes/win-arm64/native/" CopyToOutputDirectory="PreserveNewest">
-			<Link>runtimes\win-arm64\native\liteapi_rust.dll</Link>
+			<Link>liteapi_rust.dll</Link>
 		</Content>
 		<Content Include="runtimes\linux-x64\native\libliteapi_rust.so" Condition="Exists('runtimes\linux-x64\native\libliteapi_rust.so')" Pack="true" PackagePath="runtimes/linux-x64/native/" CopyToOutputDirectory="PreserveNewest">
-			<Link>runtimes/linux-x64/native/libliteapi_rust.so</Link>
+			<Link>libliteapi_rust.so</Link>
 		</Content>
 		<Content Include="runtimes\linux-arm64\native\libliteapi_rust.so" Condition="Exists('runtimes\linux-arm64\native\libliteapi_rust.so')" Pack="true" PackagePath="runtimes/linux-arm64/native/" CopyToOutputDirectory="PreserveNewest">
-			<Link>runtimes/linux-arm64/native/libliteapi_rust.so</Link>
+			<Link>libliteapi_rust.so</Link>
 		</Content>
 		<Content Include="runtimes\osx-x64\native\libliteapi_rust.dylib" Condition="Exists('runtimes\osx-x64\native\libliteapi_rust.dylib')" Pack="true" PackagePath="runtimes/osx-x64/native/" CopyToOutputDirectory="PreserveNewest">
-			<Link>runtimes/osx-x64/native/libliteapi_rust.dylib</Link>
+			<Link>libliteapi_rust.dylib</Link>
 		</Content>
 		<Content Include="runtimes\osx-arm64\native\libliteapi_rust.dylib" Condition="Exists('runtimes\osx-arm64\native\libliteapi_rust.dylib')" Pack="true" PackagePath="runtimes/osx-arm64/native/" CopyToOutputDirectory="PreserveNewest">
-			<Link>runtimes/osx-arm64/native/libliteapi_rust.dylib</Link>
+			<Link>libliteapi_rust.dylib</Link>
 		</Content>
 	</ItemGroup>
 

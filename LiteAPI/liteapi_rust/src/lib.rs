@@ -12,12 +12,13 @@
 //! | `LITEAPI_RUST_ADDR`               | `127.0.0.1:6080` | Bind address                                                   |
 //! | `LITEAPI_RUST_MAX_CONCURRENT`     | `0` (unlimited)  | Backpressure: cap the number of in-flight requests             |
 //! | `LITEAPI_RUST_MAX_BODY_BYTES`     | `0` (unlimited)  | Reject requests whose `Content-Length` exceeds this with 413   |
-//! | `LITEAPI_RUST_READ_TIMEOUT_SECS`  | `30`             | Per-connection read timeout in seconds                         |
+//! | `LITEAPI_RUST_READ_TIMEOUT_SECS`  | `30`             | Per-request read timeout in seconds                            |
+//! | `LITEAPI_RUST_IDLE_TIMEOUT_SECS`  | `15`             | Idle timeout between keep-alive requests in seconds            |
 //! | `LITEAPI_RUST_MAX_HEADER_BYTES`   | `65_536`         | Reject requests whose request-line + headers exceed this (DoS) |
 
 use std::env;
 use std::ffi::CString;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::raw::{c_char, c_int};
 use std::sync::{Arc, Condvar, Mutex};
@@ -37,6 +38,7 @@ type HandleRequestV2 = unsafe extern "C" fn(
 type FreeBytes = unsafe extern "C" fn(*mut u8, usize);
 
 const DEFAULT_READ_TIMEOUT_SECS: u64 = 30;
+const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 15;
 const DEFAULT_MAX_HEADER_BYTES: usize = 64 * 1024;
 
 #[no_mangle]
@@ -71,17 +73,22 @@ pub extern "C" fn start_listener_v2(
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
+                // Disable Nagle on the accepted socket; tiny responses are
+                // fine on loopback but Nagle interacts poorly with the
+                // request-per-RTT keep-alive pattern below.
+                let _ = stream.set_nodelay(true);
+
                 let limiter = limiter.clone();
                 let cfg = cfg.clone();
                 acquire_permit(&limiter, cfg.max_concurrent);
-                let _permit = PermitGuard::new(limiter.clone(), cfg.max_concurrent);
+                let permit = PermitGuard::new(limiter.clone(), cfg.max_concurrent);
 
                 thread::spawn(move || {
-                    // Permit is released when this guard drops — even on panic,
-                    // because `panic = abort` in release means the process
-                    // terminates, while in dev the guard still runs.
-                    let _permit = _permit;
-                    serve_one(stream, handler, free_bytes, &cfg);
+                    // Permit is released when this guard drops, including on
+                    // panic in dev builds (panic=abort in release terminates
+                    // the process, also fine).
+                    let _permit = permit;
+                    serve_connection(stream, handler, free_bytes, &cfg);
                 });
             }
             Err(err) => eprintln!("start_listener_v2: accept failed: {err}"),
@@ -98,6 +105,7 @@ struct ListenerConfig {
     max_body_bytes: usize,
     max_header_bytes: usize,
     read_timeout: Duration,
+    idle_timeout: Duration,
 }
 
 impl ListenerConfig {
@@ -117,6 +125,9 @@ impl ListenerConfig {
             read_timeout: Duration::from_secs(
                 parse_u64_env("LITEAPI_RUST_READ_TIMEOUT_SECS").unwrap_or(DEFAULT_READ_TIMEOUT_SECS),
             ),
+            idle_timeout: Duration::from_secs(
+                parse_u64_env("LITEAPI_RUST_IDLE_TIMEOUT_SECS").unwrap_or(DEFAULT_IDLE_TIMEOUT_SECS),
+            ),
         }
     }
 }
@@ -129,42 +140,90 @@ fn parse_u64_env(name: &str) -> Option<u64> {
     env::var(name).ok().and_then(|v| v.parse().ok())
 }
 
-fn serve_one(
-    mut stream: TcpStream,
+/// Handles every request that comes in on a single TCP connection. The
+/// connection is kept open across requests unless either side asks to close
+/// or the idle timeout expires between two requests.
+fn serve_connection(
+    stream: TcpStream,
     handler: HandleRequestV2,
     free_bytes: FreeBytes,
     cfg: &ListenerConfig,
 ) {
-    if let Err(err) = stream.set_read_timeout(Some(cfg.read_timeout)) {
-        eprintln!("client(v2): set_read_timeout failed: {err}");
-        return;
-    }
-
     let remote_ip = stream
         .peer_addr()
         .ok()
         .map(|a| a.ip().to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
-    match parse_request_v2(&mut stream, cfg.max_body_bytes, cfg.max_header_bytes) {
-        Ok(ParseOutcome::Ok(req)) => match invoke_handler_v2(handler, free_bytes, &remote_ip, req) {
-            Ok(response_bytes) => {
-                if let Err(err) = stream.write_all(&response_bytes) {
-                    eprintln!("client(v2): write failed: {err}");
+    let mut writer = match stream.try_clone() {
+        Ok(c) => c,
+        Err(err) => {
+            eprintln!("client(v2): try_clone failed: {err}");
+            return;
+        }
+    };
+    let mut reader = BufReader::new(stream);
+
+    // The first request must arrive within read_timeout; subsequent requests
+    // get the more generous idle_timeout.
+    let mut next_timeout = cfg.read_timeout;
+
+    loop {
+        if let Err(err) = reader.get_ref().set_read_timeout(Some(next_timeout)) {
+            eprintln!("client(v2): set_read_timeout failed: {err}");
+            return;
+        }
+
+        match parse_request_v2(&mut reader, cfg.max_body_bytes, cfg.max_header_bytes) {
+            Ok(ParseOutcome::Ok(req)) => {
+                let keep_alive = req.keep_alive;
+                match invoke_handler_v2(handler, free_bytes, &remote_ip, req) {
+                    Ok(response_bytes) => {
+                        if let Err(err) = writer.write_all(&response_bytes) {
+                            eprintln!("client(v2): write failed: {err}");
+                            return;
+                        }
+                        if let Err(err) = writer.flush() {
+                            eprintln!("client(v2): flush failed: {err}");
+                            return;
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!("client(v2): handler failed: {err}");
+                        return;
+                    }
                 }
-                let _ = stream.flush();
+
+                if !keep_alive {
+                    return;
+                }
+
+                // Switch to the idle timeout so a quiet client gets reaped
+                // sooner than a slow first-request client.
+                next_timeout = cfg.idle_timeout;
             }
-            Err(err) => eprintln!("client(v2): handler failed: {err}"),
-        },
-        Ok(ParseOutcome::BodyTooLarge) => {
-            let _ = write_413(&mut stream, cfg.max_body_bytes);
+            Ok(ParseOutcome::Empty) => return,
+            Ok(ParseOutcome::BodyTooLarge) => {
+                let _ = write_413(&mut writer, cfg.max_body_bytes);
+                return;
+            }
+            Ok(ParseOutcome::HeadersTooLarge) => {
+                let _ = write_status(&mut writer, 431, "Request Header Fields Too Large",
+                    "Header section exceeds configured limit.");
+                return;
+            }
+            Err(err) => {
+                // io::ErrorKind::WouldBlock / TimedOut → idle expiry, normal.
+                let kind = err.kind();
+                if kind != std::io::ErrorKind::WouldBlock
+                    && kind != std::io::ErrorKind::TimedOut
+                    && kind != std::io::ErrorKind::UnexpectedEof
+                {
+                    eprintln!("client(v2): request parse failed: {err}");
+                }
+                return;
+            }
         }
-        Ok(ParseOutcome::HeadersTooLarge) => {
-            let _ = write_status(&mut stream, 431, "Request Header Fields Too Large",
-                "Header section exceeds configured limit.");
-        }
-        Ok(ParseOutcome::Empty) => { /* idle client — close */ }
-        Err(err) => eprintln!("client(v2): request parse failed: {err}"),
     }
 }
 
@@ -219,6 +278,9 @@ struct RequestV2 {
     path: String,
     headers: String,
     body: Vec<u8>,
+    /// `true` when the request (and the negotiated HTTP version) wants the
+    /// connection to be reused for the next request.
+    keep_alive: bool,
 }
 
 enum ParseOutcome {
@@ -228,12 +290,11 @@ enum ParseOutcome {
     HeadersTooLarge,
 }
 
-fn parse_request_v2(
-    stream: &mut TcpStream,
+fn parse_request_v2<R: BufRead>(
+    reader: &mut R,
     max_body_bytes: usize,
     max_header_bytes: usize,
 ) -> std::io::Result<ParseOutcome> {
-    let mut reader = BufReader::new(stream);
     let mut header_bytes_consumed: usize = 0;
 
     let mut request_line = String::new();
@@ -249,9 +310,14 @@ fn parse_request_v2(
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or("").to_string();
     let path = parts.next().unwrap_or("/").to_string();
+    let http_version = parts.next().unwrap_or("HTTP/1.1");
     if method.is_empty() {
         return Ok(ParseOutcome::Empty);
     }
+
+    // HTTP/1.0 defaults to close, HTTP/1.1 defaults to keep-alive — the
+    // Connection header on the request can flip the default either way.
+    let mut keep_alive = !http_version.eq_ignore_ascii_case("HTTP/1.0");
 
     let mut headers_lines: Vec<String> = Vec::new();
     let mut content_length: usize = 0;
@@ -277,6 +343,13 @@ fn parse_request_v2(
         let lower = trimmed.to_ascii_lowercase();
         if let Some(value) = lower.strip_prefix("content-length:") {
             content_length = value.trim().parse::<usize>().unwrap_or(0);
+        } else if let Some(value) = lower.strip_prefix("connection:") {
+            let v = value.trim();
+            if v.eq_ignore_ascii_case("close") {
+                keep_alive = false;
+            } else if v.eq_ignore_ascii_case("keep-alive") {
+                keep_alive = true;
+            }
         }
     }
 
@@ -294,6 +367,7 @@ fn parse_request_v2(
         path,
         headers: headers_lines.join("\n"),
         body,
+        keep_alive,
     }))
 }
 

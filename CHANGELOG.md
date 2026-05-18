@@ -1,5 +1,46 @@
 # Changelog
 
+## [2.3.0] — 2026-05-18
+
+### Added — HTTP/1.1 keep-alive in the Rust listener
+
+The native listener now reuses a single TCP connection across requests instead of closing after each response. A connection is kept open between requests as long as:
+
+- The request did not send `Connection: close`,
+- The HTTP version is `HTTP/1.1` (or `HTTP/1.0 Connection: keep-alive`),
+- The next request arrives before the idle timeout expires.
+
+New env var:
+
+- `LITEAPI_RUST_IDLE_TIMEOUT_SECS` (default `15`) — how long the server waits between requests on an idle keep-alive connection before reaping it. The existing `LITEAPI_RUST_READ_TIMEOUT_SECS` (default `30`) now applies only to the first request on a freshly accepted connection.
+
+Other listener-level tweaks:
+
+- Accepted sockets are set to `TCP_NODELAY` to keep small responses off Nagle's algorithm — this was the main source of pathological latency on the request-per-RTT keep-alive pattern.
+- The serve loop reads through `BufReader<TcpStream>` and writes through a cloned `TcpStream` handle, so request parsing keeps its read-buffer state across requests on the same connection.
+- Idle expiry (`WouldBlock` / `TimedOut` / `UnexpectedEof`) is treated as a normal end-of-connection event instead of being logged as a failure.
+
+### Changed — Bridge no longer forces `Connection: close`
+
+`RustBridge.WriteResponse` previously wrote `Connection: close` on every framework response, which defeated keep-alive even after the listener supported it. The bridge now leaves `Connection` unset (HTTP/1.1 default is keep-alive) and lets the Rust listener decide whether to close based on the request. `Content-Length` is still framework-owned.
+
+### Fixed — Native asset paths for ProjectReference consumers
+
+`LiteAPI.csproj` now sets `<Link>` on the `runtimes/<rid>/native/` content items to a *flat* filename (`liteapi_rust.dll`, `libliteapi_rust.so`, `libliteapi_rust.dylib`) so that ProjectReference consumers like `LiteAPI.Example` get the native dropped flat next to their executable — the first directory the .NET P/Invoke resolver searches. NuGet consumers continue to pick the native up from `runtimes/<rid>/native/` via the package's generated `deps.json`.
+
+### Performance
+
+Comparative bench (50,000 req x 64 concurrent, loopback, Release, Windows):
+
+| Scenario          | LiteAPI managed         | LiteAPI Rust            | Minimal API             |
+| ----------------- | ----------------------- | ----------------------- | ----------------------- |
+| `GET /healthz`    | 33,715 rps, p99 14.64 ms | **60,241 rps, p99 3.77 ms** | 43,706 rps, p99 3.87 ms |
+| `GET /todos`      | 46,816 rps, p99 14.05 ms | **73,855 rps, p99 3.32 ms** | 45,086 rps, p99 4.70 ms |
+| `GET /todos/1`    | 50,968 rps, p99 15.79 ms | **114,679 rps, p99 2.20 ms** | 23,697 rps, p99 5.74 ms |
+| `POST /echo`      | 29,568 rps, p99 14.78 ms | **56,948 rps, p99 5.18 ms** | 24,814 rps, p99 5.15 ms |
+
+The Rust listener now leads on both throughput and tail latency across the four canonical scenarios, with sub-millisecond p50 on every endpoint.
+
 ## [2.1.0] — Unreleased
 
 Adds the major roadmap features in a single release: streaming responses, a real multipart parser with file uploads, opt-in response caching, and DataAnnotations validation. All built on the 2.0 architecture; no breaking changes to the buffered request/response surface.

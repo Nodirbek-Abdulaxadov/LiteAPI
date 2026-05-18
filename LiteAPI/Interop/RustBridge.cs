@@ -218,13 +218,10 @@ internal static class RustBridge
 
         // User-supplied headers.
         var hasContentType = false;
-        var hasContentLength = false;
-        var hasConnection = false;
         foreach (var h in responseHeaders)
         {
             if (string.Equals(h.Key, "Content-Type", StringComparison.OrdinalIgnoreCase)) hasContentType = true;
-            else if (string.Equals(h.Key, "Content-Length", StringComparison.OrdinalIgnoreCase)) { hasContentLength = true; continue; }
-            else if (string.Equals(h.Key, "Connection", StringComparison.OrdinalIgnoreCase)) hasConnection = true;
+            else if (string.Equals(h.Key, "Content-Length", StringComparison.OrdinalIgnoreCase)) continue; // framework owns this
             WriteHeader(writer, h.Key, h.Value);
         }
 
@@ -232,11 +229,11 @@ internal static class RustBridge
         if (!hasContentType && !string.IsNullOrWhiteSpace(response.ContentType))
             WriteHeader(writer, "Content-Type", response.ContentType);
 
-        // Always overwrite Content-Length and Connection with framework values.
-        _ = hasContentLength;
+        // Always set the framework's Content-Length so the client knows where
+        // the body ends. Connection header is intentionally omitted — the Rust
+        // listener decides keep-alive based on the *request*, and HTTP/1.1
+        // clients default to keep-alive when no Connection header is sent.
         WriteHeader(writer, "Content-Length", body.Length.ToString(CultureInfo.InvariantCulture));
-        if (!hasConnection)
-            WriteHeader(writer, "Connection", "close");
 
         WriteAscii(writer, "\r\n");
 
