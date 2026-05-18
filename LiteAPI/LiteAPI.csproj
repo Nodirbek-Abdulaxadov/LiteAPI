@@ -1,26 +1,17 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<TargetFramework>net9.0</TargetFramework>
-		<ImplicitUsings>enable</ImplicitUsings>
-		<Nullable>enable</Nullable>
+		<TargetFrameworks>net8.0;net9.0</TargetFrameworks>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<PackageId>LiteAPI.Core</PackageId>
 		<Title>LiteAPI – Minimal C# Micro Web Framework</Title>
-		<Authors>Nodirbek Abdulakhadov</Authors>
-		<Company>MDevs Group</Company>
-		<Description>A minimal, dependency-free C# micro web framework for building lightweight REST APIs, internal tools, and microservices without the complexity of heavy frameworks.</Description>
-		<PackageProjectUrl>https://github.com/Nodirbek-Abdulaxadov/LiteAPI</PackageProjectUrl>
-		<RepositoryUrl>https://github.com/Nodirbek-Abdulaxadov/LiteAPI</RepositoryUrl>
-		<PackageTags>#csharp #dotnet #restapi #api</PackageTags>
-		<PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+		<Description>A minimal, dependency-free C# micro web framework for building lightweight REST APIs, internal tools, and microservices. 2.0 adds graceful shutdown, compiled handler delegates, async response writes, and unified sync/async routing.</Description>
+		<PackageTags>csharp;dotnet;restapi;api;minimal;framework;rust</PackageTags>
 		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
 		<PackageReadmeFile>Readme.md</PackageReadmeFile>
-		<Version>1.1.3</Version>
 		<RootNamespace>LiteAPI</RootNamespace>
-		<NoWarn>$(NoWarn);CA1050</NoWarn>
-		<NoWarn>$(NoWarn);IDE0130</NoWarn>
-		<NoWarn>$(NoWarn);IDE0060</NoWarn>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<NoWarn>$(NoWarn);CA1050;IDE0130;IDE0060;CS1591</NoWarn>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -42,6 +33,10 @@
 		<None Include="runtimes\linux-arm64\native\libliteapi_rust.so" Condition="Exists('runtimes\linux-arm64\native\libliteapi_rust.so')" Pack="true" PackagePath="runtimes/linux-arm64/native/" />
 		<None Include="runtimes\osx-x64\native\libliteapi_rust.dylib" Condition="Exists('runtimes\osx-x64\native\libliteapi_rust.dylib')" Pack="true" PackagePath="runtimes/osx-x64/native/" />
 		<None Include="runtimes\osx-arm64\native\libliteapi_rust.dylib" Condition="Exists('runtimes\osx-arm64\native\libliteapi_rust.dylib')" Pack="true" PackagePath="runtimes/osx-arm64/native/" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="LiteAPI.Tests" />
 	</ItemGroup>
 
 	<Target Name="CopyRustNativeToRuntimes" BeforeTargets="Build;Pack">

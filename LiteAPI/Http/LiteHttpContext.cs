@@ -1,4 +1,4 @@
-﻿using LiteAPI.Http;
+using LiteAPI.Http;
 
 public class LiteHttpContext
 {
@@ -16,7 +16,10 @@ public class LiteHttpContext
     public LiteRequest Request { get; }
 
     /// <summary>
-    /// Response headers set by middlewares/features. For HttpListener mode these are copied to RawResponse.
+    /// Response headers set by middlewares / features.
+    /// In <see cref="HttpListener"/> mode these are flushed to the underlying
+    /// <see cref="HttpListenerResponse"/> at write time — do not also write to
+    /// <c>RawResponse.Headers</c> in user code, the host does it for you.
     /// </summary>
     public Dictionary<string, string> ResponseHeaders { get; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -39,7 +42,7 @@ public class LiteHttpContext
             ? incoming
             : Guid.NewGuid().ToString("n");
 
-        SetResponseHeader("X-Request-Id", TraceId);
+        ResponseHeaders["X-Request-Id"] = TraceId;
     }
 
     internal LiteHttpContext(LiteRequest request, Dictionary<string, string>? routeParams = null)
@@ -51,13 +54,14 @@ public class LiteHttpContext
             ? incoming
             : Guid.NewGuid().ToString("n");
 
-        SetResponseHeader("X-Request-Id", TraceId);
+        ResponseHeaders["X-Request-Id"] = TraceId;
     }
 
+    /// <summary>
+    /// Sets a response header. Header writes are buffered until the host
+    /// flushes them onto the underlying response — calling this twice with
+    /// the same name overwrites the previous value, never duplicates.
+    /// </summary>
     public void SetResponseHeader(string name, string value)
-    {
-        ResponseHeaders[name] = value;
-        if (RawResponse is not null)
-            RawResponse.Headers[name] = value;
-    }
+        => ResponseHeaders[name] = value;
 }

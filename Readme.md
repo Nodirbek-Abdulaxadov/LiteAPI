@@ -16,7 +16,7 @@ Package Manager:
 Install-Package LiteAPI.Core
 ```
 
-Requirements: **.NET 9.0** (the package currently targets `net9.0`).
+Requirements: **.NET 8.0** or **.NET 9.0** (the package multi-targets `net8.0;net9.0`).
 
 ## Features
 
@@ -125,6 +125,21 @@ To build and copy the Rust native library into the correct `runtimes/<rid>/nativ
 - Windows: `powershell -File scripts/build-rust-native.ps1 -Rid win-x64`
 - Linux/macOS: `bash scripts/build-rust-native.sh linux-x64` (or `osx-arm64`, etc.)
 
+## Graceful shutdown
+
+`LiteWebApplication.RunAsync(options, cancellationToken)` accepts a token and also installs a `Ctrl+C` handler. It stops accepting new requests, drains in-flight requests for up to 10 seconds, then closes the listener. Call `StopAsync()` from anywhere (e.g. an admin endpoint) to trigger the same shutdown path.
+
+```csharp
+var cts = new CancellationTokenSource();
+Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+
+await app.RunAsync(new LiteServerOptions
+{
+    MaxConcurrentRequests = 128,
+    MaxRequestBodyBytes   = 64 * 1024
+}, cts.Token);
+```
+
 ## Roadmap
 
 Next planned (high-level):
@@ -132,6 +147,8 @@ Next planned (high-level):
 - Caching middleware
 - Request validation extensions
 - CLI scaffolding for generating LiteAPI projects
+- Streaming response support (currently `Response.Body` is fully buffered as `byte[]`)
+- Proper multipart parser with file-upload support
 
 ## License
 
