@@ -25,14 +25,36 @@
 		</None>
 	</ItemGroup>
 
+	<!--
+		Native assets:
+		- Pack=true   → bundled into the NuGet package at runtimes/<rid>/native/
+		- Content + CopyToOutputDirectory → propagates to consumer projects via
+		  ProjectReference, landing at <consumer-bin>/runtimes/<rid>/native/.
+		  The .NET P/Invoke resolver looks under runtimes/<rid>/native/ relative
+		  to the entry assembly, so consumers like LiteAPI.Example pick the
+		  native up automatically.
+		Link is set so the file keeps its runtimes/<rid>/native/ subpath in the
+		output instead of getting dumped next to the exe with a flat name.
+	-->
 	<ItemGroup>
-		<!-- Native assets for NuGet (built by scripts/CI into these folders) -->
-		<None Include="runtimes\win-x64\native\liteapi_rust.dll" Condition="Exists('runtimes\win-x64\native\liteapi_rust.dll')" Pack="true" PackagePath="runtimes/win-x64/native/" />
-		<None Include="runtimes\win-arm64\native\liteapi_rust.dll" Condition="Exists('runtimes\win-arm64\native\liteapi_rust.dll')" Pack="true" PackagePath="runtimes/win-arm64/native/" />
-		<None Include="runtimes\linux-x64\native\libliteapi_rust.so" Condition="Exists('runtimes\linux-x64\native\libliteapi_rust.so')" Pack="true" PackagePath="runtimes/linux-x64/native/" />
-		<None Include="runtimes\linux-arm64\native\libliteapi_rust.so" Condition="Exists('runtimes\linux-arm64\native\libliteapi_rust.so')" Pack="true" PackagePath="runtimes/linux-arm64/native/" />
-		<None Include="runtimes\osx-x64\native\libliteapi_rust.dylib" Condition="Exists('runtimes\osx-x64\native\libliteapi_rust.dylib')" Pack="true" PackagePath="runtimes/osx-x64/native/" />
-		<None Include="runtimes\osx-arm64\native\libliteapi_rust.dylib" Condition="Exists('runtimes\osx-arm64\native\libliteapi_rust.dylib')" Pack="true" PackagePath="runtimes/osx-arm64/native/" />
+		<Content Include="runtimes\win-x64\native\liteapi_rust.dll" Condition="Exists('runtimes\win-x64\native\liteapi_rust.dll')" Pack="true" PackagePath="runtimes/win-x64/native/" CopyToOutputDirectory="PreserveNewest">
+			<Link>runtimes\win-x64\native\liteapi_rust.dll</Link>
+		</Content>
+		<Content Include="runtimes\win-arm64\native\liteapi_rust.dll" Condition="Exists('runtimes\win-arm64\native\liteapi_rust.dll')" Pack="true" PackagePath="runtimes/win-arm64/native/" CopyToOutputDirectory="PreserveNewest">
+			<Link>runtimes\win-arm64\native\liteapi_rust.dll</Link>
+		</Content>
+		<Content Include="runtimes\linux-x64\native\libliteapi_rust.so" Condition="Exists('runtimes\linux-x64\native\libliteapi_rust.so')" Pack="true" PackagePath="runtimes/linux-x64/native/" CopyToOutputDirectory="PreserveNewest">
+			<Link>runtimes/linux-x64/native/libliteapi_rust.so</Link>
+		</Content>
+		<Content Include="runtimes\linux-arm64\native\libliteapi_rust.so" Condition="Exists('runtimes\linux-arm64\native\libliteapi_rust.so')" Pack="true" PackagePath="runtimes/linux-arm64/native/" CopyToOutputDirectory="PreserveNewest">
+			<Link>runtimes/linux-arm64/native/libliteapi_rust.so</Link>
+		</Content>
+		<Content Include="runtimes\osx-x64\native\libliteapi_rust.dylib" Condition="Exists('runtimes\osx-x64\native\libliteapi_rust.dylib')" Pack="true" PackagePath="runtimes/osx-x64/native/" CopyToOutputDirectory="PreserveNewest">
+			<Link>runtimes/osx-x64/native/libliteapi_rust.dylib</Link>
+		</Content>
+		<Content Include="runtimes\osx-arm64\native\libliteapi_rust.dylib" Condition="Exists('runtimes\osx-arm64\native\libliteapi_rust.dylib')" Pack="true" PackagePath="runtimes/osx-arm64/native/" CopyToOutputDirectory="PreserveNewest">
+			<Link>runtimes/osx-arm64/native/libliteapi_rust.dylib</Link>
+		</Content>
 	</ItemGroup>
 
 	<ItemGroup>
