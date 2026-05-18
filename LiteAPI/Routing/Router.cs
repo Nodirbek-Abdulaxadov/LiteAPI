@@ -12,41 +12,60 @@ public class Router
         WriteIndented = false
     };
 
+    // Public-shape registration store. Kept to preserve the GetRoutes() contract.
     private readonly Dictionary<(string method, string path), RouteDefinition> routes = [];
+
+    // Hot-path indices, derived from `routes`.
+    // _staticRoutes: O(1) lookup when no '{' appears in the path.
+    // _paramRoutes:  iterated in registration order for path-template matching.
+    private readonly Dictionary<(string method, string path), RouteDefinition> _staticRoutes = [];
+    private readonly List<RouteDefinition> _paramRoutes = [];
+
     private readonly Dictionary<(string method, string path), RouteMetadata> _routeMetadata = [];
+
+    // Re-used between requests when a route has no captures (common static case).
+    private static readonly Dictionary<string, string> _emptyParams = new(StringComparer.OrdinalIgnoreCase);
 
     internal bool TryResolve(string method, string path, out RouteDefinition? route, out Dictionary<string, string> routeParams)
     {
         method = method.ToUpperInvariant();
 
+        // Fast path: literal routes are 99% of traffic. Avoid the foreach loop.
+        if (_staticRoutes.TryGetValue((method, path), out var fast))
+        {
+            route = fast;
+            routeParams = _emptyParams;
+            return true;
+        }
+
         route = null;
-        routeParams = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        routeParams = _emptyParams;
 
         int bestScore = int.MinValue;
         Dictionary<string, string>? bestParams = null;
+        RouteDefinition? bestRoute = null;
 
-        foreach (var kvp in routes)
+        // Slow path: walk param/wildcard routes.
+        for (int i = 0; i < _paramRoutes.Count; i++)
         {
-            var (routeMethod, routePath) = kvp.Key;
-            if (!string.Equals(routeMethod, method, StringComparison.OrdinalIgnoreCase))
+            var candidate = _paramRoutes[i];
+            if (candidate.Method != method) continue;
+
+            if (!TryMatchSegments(path, candidate.PathSegments, candidate.HasTrailingWildcard, out var parameters))
                 continue;
 
-            if (!TryMatchRoute(path, routePath, out var parameters))
-                continue;
-
-            var score = ComputeSpecificityScore(routePath);
-            if (score <= bestScore)
-                continue;
+            var score = candidate.SpecificityScore;
+            if (score <= bestScore) continue;
 
             bestScore = score;
-            route = kvp.Value;
+            bestRoute = candidate;
             bestParams = parameters;
         }
 
-        if (route is null)
-            return false;
+        if (bestRoute is null) return false;
 
-        routeParams = bestParams ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        route = bestRoute;
+        routeParams = bestParams ?? _emptyParams;
         return true;
     }
 
@@ -65,15 +84,33 @@ public class Router
         var key = (method.ToUpperInvariant(), path);
         if (routes.ContainsKey(key)) return null;
         var def = new RouteDefinition(key.Item1, path, handler);
-        routes[key] = def;
+        AddRoute(def);
         return def;
     }
 
     private RouteDefinition Handle(string method, string path, Delegate handler)
     {
         var def = new RouteDefinition(method.ToUpperInvariant(), path, handler);
-        routes[(def.Method, def.Path)] = def;
+        AddRoute(def);
         return def;
+    }
+
+    private void AddRoute(RouteDefinition def)
+    {
+        var key = (def.Method, def.Path);
+        // Replace semantics: re-registering the same key wipes the old entry from
+        // whichever bucket holds it.
+        if (routes.TryGetValue(key, out var existing))
+        {
+            if (existing.HasRouteParameters) _paramRoutes.Remove(existing);
+            else _staticRoutes.Remove(key);
+        }
+
+        routes[key] = def;
+        if (def.HasRouteParameters)
+            _paramRoutes.Add(def);
+        else
+            _staticRoutes[key] = def;
     }
 
     public Response Route(HttpListenerRequest request)
@@ -93,17 +130,21 @@ public class Router
 
     internal async Task<Response> InvokeAsync(RouteDefinition routeDefinition, LiteAPI.Http.LiteRequest request, Dictionary<string, string> routeParams, long? maxBodyBytes = null)
     {
-        var parameters = routeDefinition.HandlerParameters;
+        var parameters = routeDefinition.BoundParameters;
         var args = new object?[parameters.Length];
 
-        // Reject early when more than one parameter wants the body.
+        // Single-pass: tally body-bound params and reject early on the second one.
+        var requestMethod = request.Method;
         var bodyBoundParamCount = 0;
-        foreach (var p in parameters)
+        for (int i = 0; i < parameters.Length; i++)
         {
-            if (NeedsBody(p, request.Method)) bodyBoundParamCount++;
+            if (parameters[i].NeedsBody(requestMethod))
+            {
+                bodyBoundParamCount++;
+                if (bodyBoundParamCount > 1)
+                    return Response.BadRequest("Only one body/form parameter is supported per handler.");
+            }
         }
-        if (bodyBoundParamCount > 1)
-            return Response.BadRequest("Only one body/form parameter is supported per handler.");
 
         byte[]? bodyBytes = null;
         string? bodyText = null;
@@ -134,13 +175,9 @@ public class Router
         for (int i = 0; i < parameters.Length; i++)
         {
             var param = parameters[i];
-            var paramName = param.Name!;
-            var fromRoute = param.GetCustomAttribute<FromRouteAttribute>() != null;
-            var fromQuery = param.GetCustomAttribute<FromQueryAttribute>() != null;
-            var fromBody = param.GetCustomAttribute<FromBodyAttribute>() != null;
-            var fromForm = param.GetCustomAttribute<FromFormAttribute>() != null;
+            var paramName = param.Name;
 
-            if (param.ParameterType == typeof(HttpListenerRequest))
+            if (param.IsHttpListenerRequest)
             {
                 if (request.Raw is null)
                     return Response.InternalServerError("HttpListenerRequest is not available when using the Rust listener. Use LiteRequest instead.");
@@ -148,113 +185,113 @@ public class Router
                 continue;
             }
 
-            if (param.ParameterType == typeof(LiteAPI.Http.LiteRequest))
+            if (param.IsLiteRequest)
             {
                 args[i] = request;
                 continue;
             }
 
-            if (fromRoute || (!fromQuery && !fromBody && !fromForm && IsSimpleType(param.ParameterType) && routeParams.ContainsKey(paramName)))
+            if (param.FromRoute || (!param.FromQuery && !param.FromBody && !param.FromForm && param.IsSimple && routeParams.ContainsKey(paramName)))
             {
                 if (routeParams.TryGetValue(paramName, out var routeValue))
                 {
-                    if (!TypeConversion.TryConvert(routeValue, param.ParameterType, out var converted))
+                    if (!TypeConversion.TryConvert(routeValue, param.Type, out var converted))
                         return Response.BadRequest($"Invalid route value for '{paramName}': '{routeValue}'");
                     args[i] = converted;
                 }
                 else
                 {
-                    args[i] = GetDefault(param.ParameterType);
+                    args[i] = GetDefault(param.Type);
                 }
                 continue;
             }
 
-            if (fromQuery)
+            if (param.FromQuery)
             {
-                if (IsSimpleType(param.ParameterType))
+                if (param.IsSimple)
                 {
                     if (request.Query.TryGetValue(paramName, out var qValue) && qValue != null)
                     {
-                        if (!TypeConversion.TryConvert(qValue, param.ParameterType, out var converted))
+                        if (!TypeConversion.TryConvert(qValue, param.Type, out var converted))
                             return Response.BadRequest($"Invalid query value for '{paramName}': '{qValue}'");
                         args[i] = converted;
                     }
                     else
                     {
-                        args[i] = GetDefault(param.ParameterType);
+                        args[i] = GetDefault(param.Type);
                     }
                 }
-                else if (param.ParameterType.IsClass)
+                else if (param.Type.IsClass)
                 {
                     var query = HttpUtility.ParseQueryString(string.Empty);
                     foreach (var kvp in request.Query)
                         query[kvp.Key] = kvp.Value;
-                    args[i] = query.BindQuery(param.ParameterType);
+                    args[i] = query.BindQuery(param.Type);
                 }
                 else
                 {
-                    args[i] = GetDefault(param.ParameterType);
+                    args[i] = GetDefault(param.Type);
                 }
                 continue;
             }
 
-            if (fromForm)
+            if (param.FromForm)
             {
                 if (!bodyRead || bodyBytes is null)
                 {
-                    args[i] = GetDefault(param.ParameterType);
+                    args[i] = GetDefault(param.Type);
                 }
                 else if (request.ContentType != null && request.ContentType.StartsWith("multipart/form-data", StringComparison.OrdinalIgnoreCase))
                 {
                     using var stream = new MemoryStream(bodyBytes, writable: false);
-                    args[i] = stream.BindMultipart(request.ContentType, param.ParameterType);
+                    args[i] = stream.BindMultipart(request.ContentType, param.Type);
                 }
                 else
                 {
-                    args[i] = RequestBinder.Bind(bodyText ?? string.Empty, param.ParameterType);
+                    args[i] = RequestBinder.Bind(bodyText ?? string.Empty, param.Type);
                 }
                 continue;
             }
 
-            if (fromBody)
+            if (param.FromBody)
             {
                 args[i] = (bodyRead && !string.IsNullOrWhiteSpace(bodyText))
-                    ? DeserializeJsonOrBadRequest(bodyText!, param.ParameterType)
-                    : GetDefault(param.ParameterType);
+                    ? DeserializeJsonOrBadRequest(bodyText!, param.Type)
+                    : GetDefault(param.Type);
                 if (args[i] is Response r) return r;
                 continue;
             }
 
             // No explicit attribute. Heuristic for write methods + complex types.
-            if (IsSimpleType(param.ParameterType))
+            if (param.IsSimple)
             {
                 if (routeParams.TryGetValue(paramName, out var rv) && rv != null)
                 {
-                    if (!TypeConversion.TryConvert(rv, param.ParameterType, out var converted))
+                    if (!TypeConversion.TryConvert(rv, param.Type, out var converted))
                         return Response.BadRequest($"Invalid value for '{paramName}': '{rv}'");
                     args[i] = converted;
                 }
                 else if (request.Query.TryGetValue(paramName, out var qv) && qv != null)
                 {
-                    if (!TypeConversion.TryConvert(qv, param.ParameterType, out var converted))
+                    if (!TypeConversion.TryConvert(qv, param.Type, out var converted))
                         return Response.BadRequest($"Invalid query value for '{paramName}': '{qv}'");
                     args[i] = converted;
                 }
                 else
                 {
-                    args[i] = GetDefault(param.ParameterType);
+                    args[i] = GetDefault(param.Type);
                 }
             }
-            else if (param.ParameterType.IsClass && request.Method is "POST" or "PUT" or "PATCH")
+            else if (param.Type.IsClass && (requestMethod == "POST" || requestMethod == "PUT" || requestMethod == "PATCH"))
             {
                 args[i] = (bodyRead && !string.IsNullOrWhiteSpace(bodyText))
-                    ? DeserializeJsonOrBadRequest(bodyText!, param.ParameterType)
-                    : GetDefault(param.ParameterType);
+                    ? DeserializeJsonOrBadRequest(bodyText!, param.Type)
+                    : GetDefault(param.Type);
                 if (args[i] is Response r) return r;
             }
             else
             {
-                args[i] = GetDefault(param.ParameterType);
+                args[i] = GetDefault(param.Type);
             }
         }
 
@@ -269,7 +306,7 @@ public class Router
             {
                 var value = args[i];
                 if (value is null) continue;
-                if (!IsComplexBindable(parameters[i].ParameterType)) continue;
+                if (!IsComplexBindable(parameters[i].Type)) continue;
 
                 if (!ModelValidator.TryValidate(value, out var failures))
                 {
@@ -328,19 +365,6 @@ public class Router
         }
     }
 
-    private static bool NeedsBody(ParameterInfo p, string requestMethod)
-    {
-        if (p.GetCustomAttribute<FromBodyAttribute>() != null) return true;
-        if (p.GetCustomAttribute<FromFormAttribute>() != null) return true;
-        if (p.GetCustomAttribute<FromRouteAttribute>() != null) return false;
-        if (p.GetCustomAttribute<FromQueryAttribute>() != null) return false;
-        if (p.ParameterType == typeof(HttpListenerRequest)) return false;
-        if (p.ParameterType == typeof(LiteAPI.Http.LiteRequest)) return false;
-        if (!IsSimpleType(p.ParameterType) && p.ParameterType.IsClass && requestMethod is "POST" or "PUT" or "PATCH")
-            return true;
-        return false;
-    }
-
     private sealed class PayloadTooLargeException : Exception { }
 
     private static async Task CopyToWithLimitAsync(Stream input, Stream output, long maxBytes)
@@ -351,12 +375,10 @@ public class Router
         while (true)
         {
             var read = await input.ReadAsync(buffer);
-            if (read <= 0)
-                break;
+            if (read <= 0) break;
 
             total += read;
-            if (total > maxBytes)
-                throw new PayloadTooLargeException();
+            if (total > maxBytes) throw new PayloadTooLargeException();
 
             await output.WriteAsync(buffer.AsMemory(0, read));
         }
@@ -416,102 +438,83 @@ public class Router
         return c == '{' || c == '[';
     }
 
-    private static bool TryMatchRoute(string requestPath, string routePath, out Dictionary<string, string> parameters)
+    /// <summary>
+    /// Span-based segment matcher. Iterates the request path once without
+    /// allocating an intermediate <c>string[]</c> for the request side.
+    /// </summary>
+    private static bool TryMatchSegments(string requestPath, string[] routeSegments, bool hasTrailingWildcard, out Dictionary<string, string> parameters)
     {
         parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var path = requestPath.AsSpan();
 
-        var requestParts = requestPath.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
-        var routeParts = routePath.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        // Skip leading slashes.
+        int p = 0;
+        while (p < path.Length && path[p] == '/') p++;
 
-        if (routeParts.Length == 0)
-            return requestParts.Length == 0;
+        if (p == path.Length)
+            return routeSegments.Length == 0;
 
-        var hasTrailingWildcard = routeParts.Length > 0
-            && routeParts[^1].StartsWith("{*", StringComparison.Ordinal)
-            && routeParts[^1].EndsWith("}", StringComparison.Ordinal);
+        if (routeSegments.Length == 0) return false;
 
-        if (!hasTrailingWildcard && requestParts.Length != routeParts.Length)
-            return false;
-
-        if (hasTrailingWildcard && requestParts.Length < routeParts.Length - 1)
-            return false;
-
-        for (int i = 0; i < routeParts.Length; i++)
+        int routeIdx = 0;
+        while (p < path.Length)
         {
-            var routePart = routeParts[i];
+            // Find end of this request segment.
+            int segStart = p;
+            while (p < path.Length && path[p] != '/') p++;
+            var segment = path[segStart..p];
 
-            if (routePart.StartsWith("{*", StringComparison.Ordinal) && routePart.EndsWith("}", StringComparison.Ordinal))
+            if (routeIdx >= routeSegments.Length)
+                return false;
+
+            var routePart = routeSegments[routeIdx];
+
+            // Trailing wildcard captures everything from here on.
+            if (routePart.Length >= 3 && routePart[0] == '{' && routePart[1] == '*' && routePart[^1] == '}')
             {
-                if (i != routeParts.Length - 1)
+                if (routeIdx != routeSegments.Length - 1)
                     return false;
-
                 var paramName = routePart[2..^1];
-                var remainder = requestParts.Length <= i
-                    ? string.Empty
-                    : string.Join('/', requestParts.Skip(i));
-                parameters[paramName] = remainder;
+                parameters[paramName] = path[segStart..].ToString().TrimEnd('/');
                 return true;
             }
 
-            if (i >= requestParts.Length)
-                return false;
-
-            if (routePart.StartsWith('{') && routePart.EndsWith('}'))
+            if (routePart.Length >= 2 && routePart[0] == '{' && routePart[^1] == '}')
             {
                 var paramName = routePart[1..^1];
-                parameters[paramName] = requestParts[i];
+                parameters[paramName] = segment.ToString();
             }
-            else if (!string.Equals(routePart, requestParts[i], StringComparison.OrdinalIgnoreCase))
+            else if (!segment.Equals(routePart.AsSpan(), StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
+
+            routeIdx++;
+
+            // Skip the separator slash(es).
+            while (p < path.Length && path[p] == '/') p++;
         }
-        return true;
-    }
 
-    private static int ComputeSpecificityScore(string routePath)
-    {
-        var parts = routePath.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 0)
-            return 1_000_000;
-
-        var hasWildcard = parts.Length > 0 && parts[^1].StartsWith("{*", StringComparison.Ordinal) && parts[^1].EndsWith("}", StringComparison.Ordinal);
-        int literalCount = 0;
-        int paramCount = 0;
-
-        foreach (var part in parts)
+        if (routeIdx < routeSegments.Length)
         {
-            if (part.StartsWith("{*", StringComparison.Ordinal) && part.EndsWith("}", StringComparison.Ordinal))
-                continue;
-            if (part.StartsWith('{') && part.EndsWith('}'))
-                paramCount++;
-            else
-                literalCount++;
+            // Allow trailing wildcard to absorb zero segments.
+            if (hasTrailingWildcard && routeIdx == routeSegments.Length - 1)
+            {
+                var routePart = routeSegments[routeIdx];
+                if (routePart.Length >= 3 && routePart[0] == '{' && routePart[1] == '*' && routePart[^1] == '}')
+                {
+                    parameters[routePart[2..^1]] = string.Empty;
+                    return true;
+                }
+            }
+            return false;
         }
 
-        var score = literalCount * 100 - paramCount * 10 + parts.Length;
-        if (hasWildcard)
-            score -= 10_000;
-
-        return score;
+        return true;
     }
 
     private static object? GetDefault(Type type) =>
         type.IsValueType ? Activator.CreateInstance(type) : null;
-
-    private static bool IsSimpleType(Type type)
-    {
-        var underlying = Nullable.GetUnderlyingType(type) ?? type;
-        return underlying.IsPrimitive
-            || underlying.IsEnum
-            || underlying == typeof(string)
-            || underlying == typeof(Guid)
-            || underlying == typeof(DateTime)
-            || underlying == typeof(DateTimeOffset)
-            || underlying == typeof(DateOnly)
-            || underlying == typeof(TimeOnly)
-            || underlying == typeof(decimal);
-    }
 
     public void SetMetadata(string method, string path, Action<RouteMetadata> configure)
     {

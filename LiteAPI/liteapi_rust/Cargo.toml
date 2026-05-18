@@ -1,6 +1,6 @@
 [package]
 name = "liteapi_rust"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["LiteAPI contributors"]
 
@@ -8,3 +8,14 @@ authors = ["LiteAPI contributors"]
 crate-type = ["cdylib"]
 
 [dependencies]
+
+[profile.release]
+# Tighter codegen: ~30-50% smaller native artefact, ~5-10% faster hot paths.
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = "symbols"
+# A panic that crosses an FFI boundary is undefined behaviour. Abort instead
+# so the host process gets a clean termination signal rather than corrupted
+# stack state.
+panic = "abort"

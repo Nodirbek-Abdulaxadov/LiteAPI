@@ -1,21 +1,28 @@
+//! Minimal HTTP/1.1 TCP listener that forwards each request into a managed
+//! callback. Designed to be loaded as a `cdylib` by the C# host.
+//!
+//! ## ABI
+//! The only exported entry point is [`start_listener_v2`]. The legacy v1
+//! string-based ABI was removed in 0.2.0 — every C# host on master already
+//! talks v2.
+//!
+//! ## Environment variables
+//! | Name                              | Default          | Purpose                                                        |
+//! | ---                               | ---              | ---                                                            |
+//! | `LITEAPI_RUST_ADDR`               | `127.0.0.1:6080` | Bind address                                                   |
+//! | `LITEAPI_RUST_MAX_CONCURRENT`     | `0` (unlimited)  | Backpressure: cap the number of in-flight requests             |
+//! | `LITEAPI_RUST_MAX_BODY_BYTES`     | `0` (unlimited)  | Reject requests whose `Content-Length` exceeds this with 413   |
+//! | `LITEAPI_RUST_READ_TIMEOUT_SECS`  | `30`             | Per-connection read timeout in seconds                         |
+//! | `LITEAPI_RUST_MAX_HEADER_BYTES`   | `65_536`         | Reject requests whose request-line + headers exceed this (DoS) |
+
 use std::env;
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::raw::{c_char, c_int};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
-
-#[derive(Debug)]
-struct Request {
-    method: String,
-    path: String,
-    body: String,
-}
-
-type HandleRequest = unsafe extern "C" fn(*const c_char, *const c_char, *const c_char) -> *mut c_char;
-type FreeString = unsafe extern "C" fn(*mut c_char);
 
 type HandleRequestV2 = unsafe extern "C" fn(
     *const c_char,
@@ -26,67 +33,17 @@ type HandleRequestV2 = unsafe extern "C" fn(
     usize,
     *mut usize,
 ) -> *mut u8;
+
 type FreeBytes = unsafe extern "C" fn(*mut u8, usize);
 
-#[no_mangle]
-pub extern "C" fn start_listener(handle_cb: Option<HandleRequest>, free_cb: Option<FreeString>) -> c_int {
-    let Some(handler) = handle_cb else {
-        eprintln!("start_listener: handler callback is null");
-        return -1;
-    };
-    // Accept bare host:port; if a scheme is mistakenly provided, strip it.
-    let raw_addr = env::var("LITEAPI_RUST_ADDR").unwrap_or_else(|_| "127.0.0.1:6080".to_string());
-    let addr = raw_addr.trim_start_matches("http://").trim_start_matches("https://").to_string();
-
-    let listener = match TcpListener::bind(&addr) {
-        Ok(l) => {
-            println!("LiteAPI.rs running on: {addr}");
-            l
-        }
-        Err(err) => {
-            eprintln!("start_listener: failed to bind {addr}: {err}");
-            return -1;
-        }
-    };
-
-    for stream in listener.incoming() {
-        match stream {
-            Ok(mut stream) => {
-                let handler = handler;
-                let free_cb = free_cb;
-                thread::spawn(move || {
-                    if let Err(err) = stream.set_read_timeout(Some(Duration::from_secs(5))) {
-                        eprintln!("client: set_read_timeout failed: {err}");
-                        return;
-                    }
-
-                    match parse_request(&mut stream) {
-                        Ok(Some(req)) => {
-                            let body = invoke_handler(handler, free_cb, req);
-                            if let Err(err) = write_response(&mut stream, &body) {
-                                eprintln!("client: write_response failed: {err}");
-                            }
-                        }
-                        Ok(None) => {
-                            let _ = write_response(&mut stream, "");
-                        }
-                        Err(err) => {
-                            eprintln!("client: request parse failed: {err}");
-                        }
-                    }
-                });
-            }
-            Err(err) => {
-                eprintln!("start_listener: accept failed: {err}");
-            }
-        }
-    }
-
-    0
-}
+const DEFAULT_READ_TIMEOUT_SECS: u64 = 30;
+const DEFAULT_MAX_HEADER_BYTES: usize = 64 * 1024;
 
 #[no_mangle]
-pub extern "C" fn start_listener_v2(handle_cb: Option<HandleRequestV2>, free_cb: Option<FreeBytes>) -> c_int {
+pub extern "C" fn start_listener_v2(
+    handle_cb: Option<HandleRequestV2>,
+    free_cb: Option<FreeBytes>,
+) -> c_int {
     let Some(handler) = handle_cb else {
         eprintln!("start_listener_v2: handler callback is null");
         return -1;
@@ -96,149 +53,164 @@ pub extern "C" fn start_listener_v2(handle_cb: Option<HandleRequestV2>, free_cb:
         return -1;
     };
 
-    let raw_addr = env::var("LITEAPI_RUST_ADDR").unwrap_or_else(|_| "127.0.0.1:6080".to_string());
-    let addr = raw_addr
-        .trim_start_matches("http://")
-        .trim_start_matches("https://")
-        .to_string();
+    let cfg = ListenerConfig::from_env();
 
-    let max_body_bytes = env::var("LITEAPI_RUST_MAX_BODY_BYTES")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(0);
-
-    let max_concurrent = env::var("LITEAPI_RUST_MAX_CONCURRENT")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(0);
-
-    let limiter: Arc<(Mutex<usize>, Condvar)> = Arc::new((Mutex::new(0usize), Condvar::new()));
-
-    let listener = match TcpListener::bind(&addr) {
+    let listener = match TcpListener::bind(&cfg.addr) {
         Ok(l) => {
-            println!("LiteAPI.rs(v2) running on: {addr}");
+            println!("LiteAPI.rs(v2) running on: {}", cfg.addr);
             l
         }
         Err(err) => {
-            eprintln!("start_listener_v2: failed to bind {addr}: {err}");
+            eprintln!("start_listener_v2: failed to bind {}: {err}", cfg.addr);
             return -1;
         }
     };
 
+    let limiter: Arc<(Mutex<usize>, Condvar)> = Arc::new((Mutex::new(0usize), Condvar::new()));
+
     for stream in listener.incoming() {
         match stream {
-            Ok(mut stream) => {
-                let handler = handler;
-                let free_bytes = free_bytes;
+            Ok(stream) => {
                 let limiter = limiter.clone();
-                let max_concurrent = max_concurrent;
-                let max_body_bytes = max_body_bytes;
-
-                // Backpressure: do not spawn unbounded threads under load.
-                if max_concurrent > 0 {
-                    let (lock, cvar) = &*limiter;
-                    let mut active = lock.lock().unwrap();
-                    while *active >= max_concurrent {
-                        active = cvar.wait(active).unwrap();
-                    }
-                    *active += 1;
-                }
+                let cfg = cfg.clone();
+                acquire_permit(&limiter, cfg.max_concurrent);
+                let _permit = PermitGuard::new(limiter.clone(), cfg.max_concurrent);
 
                 thread::spawn(move || {
-                    if let Err(err) = stream.set_read_timeout(Some(Duration::from_secs(5))) {
-                        eprintln!("client(v2): set_read_timeout failed: {err}");
-                        release_permit(&limiter, max_concurrent);
-                        return;
-                    }
-
-                    let remote_ip = stream
-                        .peer_addr()
-                        .ok()
-                        .map(|a| a.ip().to_string())
-                        .unwrap_or_else(|| "unknown".to_string());
-
-                    match parse_request_v2(&mut stream, max_body_bytes) {
-                        Ok(Some(req)) => {
-                            if req.body_too_large {
-                                let _ = write_413(&mut stream, max_body_bytes);
-                                release_permit(&limiter, max_concurrent);
-                                return;
-                            }
-
-                            match invoke_handler_v2(handler, free_bytes, &remote_ip, req) {
-                                Ok(response_bytes) => {
-                                    if let Err(err) = stream.write_all(&response_bytes) {
-                                        eprintln!("client(v2): write failed: {err}");
-                                    }
-                                    let _ = stream.flush();
-                                }
-                                Err(err) => eprintln!("client(v2): handler failed: {err}"),
-                            }
-                        }
-                        Ok(None) => {
-                            // No request data. Close.
-                        }
-                        Err(err) => {
-                            eprintln!("client(v2): request parse failed: {err}");
-                        }
-                    }
-
-                    release_permit(&limiter, max_concurrent);
+                    // Permit is released when this guard drops — even on panic,
+                    // because `panic = abort` in release means the process
+                    // terminates, while in dev the guard still runs.
+                    let _permit = _permit;
+                    serve_one(stream, handler, free_bytes, &cfg);
                 });
             }
-            Err(err) => {
-                eprintln!("start_listener_v2: accept failed: {err}");
-            }
+            Err(err) => eprintln!("start_listener_v2: accept failed: {err}"),
         }
     }
 
     0
 }
 
-fn parse_request(stream: &mut TcpStream) -> std::io::Result<Option<Request>> {
-    let mut reader = BufReader::new(stream);
+#[derive(Clone)]
+struct ListenerConfig {
+    addr: String,
+    max_concurrent: usize,
+    max_body_bytes: usize,
+    max_header_bytes: usize,
+    read_timeout: Duration,
+}
 
-    let mut request_line = String::new();
-    if reader.read_line(&mut request_line)? == 0 {
-        return Ok(None);
-    }
+impl ListenerConfig {
+    fn from_env() -> Self {
+        let raw_addr = env::var("LITEAPI_RUST_ADDR").unwrap_or_else(|_| "127.0.0.1:6080".to_string());
+        let addr = raw_addr
+            .trim_start_matches("http://")
+            .trim_start_matches("https://")
+            .to_string();
 
-    let mut parts = request_line.split_whitespace();
-    let method = parts.next().unwrap_or("").to_string();
-    let path = parts.next().unwrap_or("/").to_string();
-
-    if method.is_empty() {
-        return Ok(None);
-    }
-
-    let mut content_length: usize = 0;
-    let mut line = String::new();
-
-    loop {
-        line.clear();
-        let read = reader.read_line(&mut line)?;
-        if read == 0 {
-            break;
-        }
-
-        let trimmed = line.trim_end_matches(&['\r', '\n'][..]);
-        if trimmed.is_empty() {
-            break;
-        }
-
-        if let Some(value) = trimmed.strip_prefix("Content-Length:") {
-            content_length = value.trim().parse::<usize>().unwrap_or(0);
+        Self {
+            addr,
+            max_concurrent: parse_usize_env("LITEAPI_RUST_MAX_CONCURRENT").unwrap_or(0),
+            max_body_bytes: parse_usize_env("LITEAPI_RUST_MAX_BODY_BYTES").unwrap_or(0),
+            max_header_bytes: parse_usize_env("LITEAPI_RUST_MAX_HEADER_BYTES")
+                .unwrap_or(DEFAULT_MAX_HEADER_BYTES),
+            read_timeout: Duration::from_secs(
+                parse_u64_env("LITEAPI_RUST_READ_TIMEOUT_SECS").unwrap_or(DEFAULT_READ_TIMEOUT_SECS),
+            ),
         }
     }
+}
 
-    let mut body = String::new();
-    if content_length > 0 {
-        let mut body_bytes = vec![0u8; content_length];
-        reader.read_exact(&mut body_bytes)?;
-        body = String::from_utf8_lossy(&body_bytes).into_owned();
+fn parse_usize_env(name: &str) -> Option<usize> {
+    env::var(name).ok().and_then(|v| v.parse().ok())
+}
+
+fn parse_u64_env(name: &str) -> Option<u64> {
+    env::var(name).ok().and_then(|v| v.parse().ok())
+}
+
+fn serve_one(
+    mut stream: TcpStream,
+    handler: HandleRequestV2,
+    free_bytes: FreeBytes,
+    cfg: &ListenerConfig,
+) {
+    if let Err(err) = stream.set_read_timeout(Some(cfg.read_timeout)) {
+        eprintln!("client(v2): set_read_timeout failed: {err}");
+        return;
     }
 
-    Ok(Some(Request { method, path, body }))
+    let remote_ip = stream
+        .peer_addr()
+        .ok()
+        .map(|a| a.ip().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    match parse_request_v2(&mut stream, cfg.max_body_bytes, cfg.max_header_bytes) {
+        Ok(ParseOutcome::Ok(req)) => match invoke_handler_v2(handler, free_bytes, &remote_ip, req) {
+            Ok(response_bytes) => {
+                if let Err(err) = stream.write_all(&response_bytes) {
+                    eprintln!("client(v2): write failed: {err}");
+                }
+                let _ = stream.flush();
+            }
+            Err(err) => eprintln!("client(v2): handler failed: {err}"),
+        },
+        Ok(ParseOutcome::BodyTooLarge) => {
+            let _ = write_413(&mut stream, cfg.max_body_bytes);
+        }
+        Ok(ParseOutcome::HeadersTooLarge) => {
+            let _ = write_status(&mut stream, 431, "Request Header Fields Too Large",
+                "Header section exceeds configured limit.");
+        }
+        Ok(ParseOutcome::Empty) => { /* idle client — close */ }
+        Err(err) => eprintln!("client(v2): request parse failed: {err}"),
+    }
+}
+
+/// Backpressure: block accept until a permit is available.
+fn acquire_permit(limiter: &Arc<(Mutex<usize>, Condvar)>, max_concurrent: usize) {
+    if max_concurrent == 0 {
+        return;
+    }
+    let (lock, cvar) = &**limiter;
+    let mut active = match lock.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    while *active >= max_concurrent {
+        active = match cvar.wait(active) {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+    }
+    *active += 1;
+}
+
+/// RAII permit: guarantees the permit is released even if the worker thread
+/// panics (no permit leak under partial failure).
+struct PermitGuard {
+    limiter: Arc<(Mutex<usize>, Condvar)>,
+    armed: bool,
+}
+
+impl PermitGuard {
+    fn new(limiter: Arc<(Mutex<usize>, Condvar)>, max_concurrent: usize) -> Self {
+        Self { limiter, armed: max_concurrent > 0 }
+    }
+}
+
+impl Drop for PermitGuard {
+    fn drop(&mut self) {
+        if !self.armed { return; }
+        let (lock, cvar) = &*self.limiter;
+        let mut active = match lock.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if *active > 0 { *active -= 1; }
+        cvar.notify_one();
+    }
 }
 
 #[derive(Debug)]
@@ -247,23 +219,38 @@ struct RequestV2 {
     path: String,
     headers: String,
     body: Vec<u8>,
-    body_too_large: bool,
 }
 
-fn parse_request_v2(stream: &mut TcpStream, max_body_bytes: usize) -> std::io::Result<Option<RequestV2>> {
+enum ParseOutcome {
+    Ok(RequestV2),
+    Empty,
+    BodyTooLarge,
+    HeadersTooLarge,
+}
+
+fn parse_request_v2(
+    stream: &mut TcpStream,
+    max_body_bytes: usize,
+    max_header_bytes: usize,
+) -> std::io::Result<ParseOutcome> {
     let mut reader = BufReader::new(stream);
+    let mut header_bytes_consumed: usize = 0;
 
     let mut request_line = String::new();
-    if reader.read_line(&mut request_line)? == 0 {
-        return Ok(None);
+    let n = reader.read_line(&mut request_line)?;
+    if n == 0 {
+        return Ok(ParseOutcome::Empty);
+    }
+    header_bytes_consumed += n;
+    if header_bytes_consumed > max_header_bytes {
+        return Ok(ParseOutcome::HeadersTooLarge);
     }
 
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or("").to_string();
     let path = parts.next().unwrap_or("/").to_string();
-
     if method.is_empty() {
-        return Ok(None);
+        return Ok(ParseOutcome::Empty);
     }
 
     let mut headers_lines: Vec<String> = Vec::new();
@@ -276,12 +263,15 @@ fn parse_request_v2(stream: &mut TcpStream, max_body_bytes: usize) -> std::io::R
         if read == 0 {
             break;
         }
+        header_bytes_consumed += read;
+        if header_bytes_consumed > max_header_bytes {
+            return Ok(ParseOutcome::HeadersTooLarge);
+        }
 
         let trimmed = line.trim_end_matches(&['\r', '\n'][..]);
         if trimmed.is_empty() {
             break;
         }
-
         headers_lines.push(trimmed.to_string());
 
         let lower = trimmed.to_ascii_lowercase();
@@ -291,14 +281,7 @@ fn parse_request_v2(stream: &mut TcpStream, max_body_bytes: usize) -> std::io::R
     }
 
     if max_body_bytes > 0 && content_length > max_body_bytes {
-        let headers = headers_lines.join("\n");
-        return Ok(Some(RequestV2 {
-            method,
-            path,
-            headers,
-            body: Vec::new(),
-            body_too_large: true,
-        }));
+        return Ok(ParseOutcome::BodyTooLarge);
     }
 
     let mut body = vec![0u8; content_length];
@@ -306,52 +289,27 @@ fn parse_request_v2(stream: &mut TcpStream, max_body_bytes: usize) -> std::io::R
         reader.read_exact(&mut body)?;
     }
 
-    let headers = headers_lines.join("\n");
-    Ok(Some(RequestV2 { method, path, headers, body, body_too_large: false }))
-}
-
-fn release_permit(limiter: &Arc<(Mutex<usize>, Condvar)>, max_concurrent: usize) {
-    if max_concurrent == 0 {
-        return;
-    }
-
-    let (lock, cvar) = &**limiter;
-    let mut active = lock.lock().unwrap();
-    if *active > 0 {
-        *active -= 1;
-    }
-    cvar.notify_one();
+    Ok(ParseOutcome::Ok(RequestV2 {
+        method,
+        path,
+        headers: headers_lines.join("\n"),
+        body,
+    }))
 }
 
 fn write_413(stream: &mut TcpStream, max_body_bytes: usize) -> std::io::Result<()> {
-    let body = format!("Request body exceeds limit ({} bytes).", max_body_bytes);
-    let header = format!(
-        "HTTP/1.1 413 Payload Too Large\r\nContent-Length: {}\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n",
-        body.as_bytes().len()
-    );
+    write_status(stream, 413, "Payload Too Large",
+        &format!("Request body exceeds limit ({} bytes).", max_body_bytes))
+}
 
+fn write_status(stream: &mut TcpStream, code: u16, reason: &str, body: &str) -> std::io::Result<()> {
+    let header = format!(
+        "HTTP/1.1 {code} {reason}\r\nContent-Length: {}\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
     stream.write_all(header.as_bytes())?;
     stream.write_all(body.as_bytes())?;
     stream.flush()
-}
-
-fn invoke_handler(handler: HandleRequest, free_cb: Option<FreeString>, req: Request) -> String {
-    let method_c = CString::new(req.method).unwrap_or_default();
-    let path_c = CString::new(req.path).unwrap_or_default();
-    let body_c = CString::new(req.body).unwrap_or_default();
-
-    let raw_ptr = unsafe { handler(method_c.as_ptr(), path_c.as_ptr(), body_c.as_ptr()) };
-    if raw_ptr.is_null() {
-        return String::new();
-    }
-
-    let response = unsafe { CStr::from_ptr(raw_ptr) }.to_string_lossy().into_owned();
-
-    if let Some(free) = free_cb {
-        unsafe { free(raw_ptr); }
-    }
-
-    response
 }
 
 fn invoke_handler_v2(
@@ -390,16 +348,4 @@ fn invoke_handler_v2(
     }
 
     Ok(bytes)
-}
-
-fn write_response(stream: &mut TcpStream, body: &str) -> std::io::Result<()> {
-    let body_bytes = body.as_bytes();
-    let header = format!(
-        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n",
-        body_bytes.len()
-    );
-
-    stream.write_all(header.as_bytes())?;
-    stream.write_all(body_bytes)?;
-    stream.flush()
 }

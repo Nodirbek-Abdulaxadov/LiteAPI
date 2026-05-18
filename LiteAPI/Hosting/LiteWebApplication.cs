@@ -103,7 +103,10 @@ public class LiteWebApplication(
             try { _shutdownCts.Cancel(); } catch { }
         };
 
-        var inFlight = new List<Task>();
+        // Lock-free in-flight tracking. ConcurrentDictionary's Add/Remove are
+        // O(1) and don't contend with each other (unlike List<Task>.Remove which
+        // is O(N) and forced everyone behind the same lock).
+        var inFlight = new ConcurrentDictionary<Task, byte>();
 
         try
         {
@@ -129,27 +132,26 @@ public class LiteWebApplication(
                     break;
                 }
 
-                var task = Task.Run(async () =>
+                Task? task = null;
+                task = Task.Run(async () =>
                 {
                     try
                     {
-                        await HandleContextAsync(context, options);
+                        await HandleContextAsync(context, options, linkedCts.Token);
                     }
                     finally
                     {
                         concurrency.Release();
+                        if (task is not null) inFlight.TryRemove(task, out _);
                     }
                 });
 
-                lock (inFlight) inFlight.Add(task);
-                _ = task.ContinueWith(t => { lock (inFlight) inFlight.Remove(t); }, TaskScheduler.Default);
+                inFlight.TryAdd(task, 0);
             }
         }
         finally
         {
-            Task[] pending;
-            lock (inFlight) pending = [.. inFlight];
-
+            var pending = inFlight.Keys.ToArray();
             try { await Task.WhenAll(pending).WaitAsync(TimeSpan.FromSeconds(10)); }
             catch { /* drain timeout — proceed with close */ }
 
@@ -158,7 +160,7 @@ public class LiteWebApplication(
         }
     }
 
-    private async Task HandleContextAsync(HttpListenerContext context, LiteServerOptions options)
+    private async Task HandleContextAsync(HttpListenerContext context, LiteServerOptions options, CancellationToken shutdownToken = default)
     {
         try
         {
@@ -198,13 +200,15 @@ public class LiteWebApplication(
             if (response.IsStreaming)
             {
                 // Streaming: no Content-Length; flush incremental writes.
+                // Pass the shutdown token so an SSE / long-poll handler stops
+                // emitting promptly when the process is asked to drain.
                 context.Response.SendChunked = true;
-                await response.StreamWriter!(context.Response.OutputStream, CancellationToken.None).ConfigureAwait(false);
+                await response.StreamWriter!(context.Response.OutputStream, shutdownToken).ConfigureAwait(false);
             }
             else
             {
                 context.Response.ContentLength64 = response.Body.Length;
-                await context.Response.OutputStream.WriteAsync(response.Body).ConfigureAwait(false);
+                await context.Response.OutputStream.WriteAsync(response.Body, shutdownToken).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
