@@ -65,21 +65,28 @@
 			SkipUnchangedFiles="true" />
 	</Target>
 
-	<Target Name="CopyRustNativeToOutput" AfterTargets="Build">
-		<!-- Project-reference friendliness: ensure the native library is present next to LiteAPI.dll -->
+	<!--
+		Project-reference friendliness: ensure the native library is present next to LiteAPI.dll
+		after build. `$(TargetDir)` already ends with the platform separator, so no extra `\`.
+		The `'$(TargetDir)' != ''` guard skips this target when MSBuild fires `AfterTargets="Build"`
+		on the multi-target dispatcher (where TargetDir is empty) — on Linux a hardcoded `\foo`
+		gets normalised to `/foo`, which is the root path, which would then 'Access denied' when
+		MSBuild tries to write it.
+	-->
+	<Target Name="CopyRustNativeToOutput" AfterTargets="Build" Condition="'$(TargetDir)' != ''">
 		<Copy Condition="'$(OS)' == 'Windows_NT' and Exists('$(MSBuildProjectDirectory)\runtimes\win-x64\native\liteapi_rust.dll')"
 			SourceFiles="$(MSBuildProjectDirectory)\runtimes\win-x64\native\liteapi_rust.dll"
-			DestinationFiles="$(TargetDir)\liteapi_rust.dll"
+			DestinationFiles="$(TargetDir)liteapi_rust.dll"
 			SkipUnchangedFiles="true" />
 
 		<Copy Condition="'$(OS)' != 'Windows_NT' and Exists('$(MSBuildProjectDirectory)\runtimes\linux-x64\native\libliteapi_rust.so')"
 			SourceFiles="$(MSBuildProjectDirectory)\runtimes\linux-x64\native\libliteapi_rust.so"
-			DestinationFiles="$(TargetDir)\libliteapi_rust.so"
+			DestinationFiles="$(TargetDir)libliteapi_rust.so"
 			SkipUnchangedFiles="true" />
 
 		<Copy Condition="'$(OS)' != 'Windows_NT' and Exists('$(MSBuildProjectDirectory)\runtimes\osx-x64\native\libliteapi_rust.dylib')"
 			SourceFiles="$(MSBuildProjectDirectory)\runtimes\osx-x64\native\libliteapi_rust.dylib"
-			DestinationFiles="$(TargetDir)\libliteapi_rust.dylib"
+			DestinationFiles="$(TargetDir)libliteapi_rust.dylib"
 			SkipUnchangedFiles="true" />
 	</Target>
 </Project>
