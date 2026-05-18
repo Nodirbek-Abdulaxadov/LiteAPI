@@ -140,15 +140,76 @@ await app.RunAsync(new LiteServerOptions
 }, cts.Token);
 ```
 
+## Streaming responses
+
+```csharp
+// Server-Sent Events
+app.Get("/events", () => Response.Sse(EventStream()));
+
+// File streaming (no full-buffer allocation)
+app.Get("/files/{name}", (string name) => Response.File($"./uploads/{name}"));
+
+// Custom writer
+app.Get("/big", () => Response.Stream(async (stream, ct) =>
+{
+    for (int i = 0; i < 1000; i++)
+        await stream.WriteAsync($"chunk {i}\n"u8.ToArray(), ct);
+}, "text/plain"));
+```
+
+## Response caching
+
+```csharp
+app.UseResponseCaching(o =>
+{
+    o.TtlSeconds = 30;
+    o.VaryByHeaders = new[] { "Accept-Language" };
+});
+
+app.Get("/expensive", () => Response.OkJson(ExpensiveLookup()));  // cached for 30s
+```
+
+Caches `GET`/`HEAD` 200s by `method | path | query | vary-by`. Adds `X-Cache: HIT/MISS`. Honours `Cache-Control: no-store`.
+
+## Validation
+
+```csharp
+builder.AddValidation();   // opt-in DataAnnotations
+
+public record Dto([Required] string Name, [Range(1,120)] int Age);
+
+app.Post("/users", ([FromBody] Dto dto) => Response.OkJson(dto));
+// invalid body → 400 with RFC 7807 problem+json
+```
+
+`[SkipValidation]` on a handler opts out; the response shape can be switched to a compact `{errors:[...]}` form or fully overridden via `ValidationOptions.CustomResponse`.
+
+## File uploads
+
+```csharp
+public class UploadDto
+{
+    public string? Description { get; set; }
+    public MultipartPart? Avatar { get; set; }   // single file
+    public List<MultipartPart>? Photos { get; set; }  // multiple files under same name
+}
+
+app.Post("/upload", ([FromForm] UploadDto dto) => Response.OkJson(new {
+    desc = dto.Description,
+    avatar = dto.Avatar?.FileName,
+    photos = dto.Photos?.Count
+}));
+```
+
+Properties typed as `MultipartPart`, `byte[]`, `List<MultipartPart>` or `IReadOnlyList<MultipartPart>` receive uploaded files; everything else still binds from text fields.
+
 ## Roadmap
 
 Next planned (high-level):
 
-- Caching middleware
-- Request validation extensions
-- CLI scaffolding for generating LiteAPI projects
-- Streaming response support (currently `Response.Body` is fully buffered as `byte[]`)
-- Proper multipart parser with file-upload support
+- CLI scaffolding (`dotnet new lite-api`)
+- True chunked transfer over the Rust listener
+- HTTPS in managed mode
 
 ## License
 

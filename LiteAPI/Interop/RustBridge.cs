@@ -148,7 +148,25 @@ internal static class RustBridge
     private static byte[] BuildHttpResponseBytes(string method, Response response, Dictionary<string, string> responseHeaders)
     {
         var isHead = string.Equals(method, "HEAD", StringComparison.OrdinalIgnoreCase);
-        var body = isHead ? Array.Empty<byte>() : (response.Body ?? Array.Empty<byte>());
+
+        // Streaming responses are materialised here because the Rust ABI returns
+        // a single contiguous buffer. True chunked transfer over the Rust path
+        // is a separate refactor.
+        byte[] body;
+        if (isHead)
+        {
+            body = Array.Empty<byte>();
+        }
+        else if (response.IsStreaming)
+        {
+            using var ms = new MemoryStream();
+            response.StreamWriter!(ms, CancellationToken.None).GetAwaiter().GetResult();
+            body = ms.ToArray();
+        }
+        else
+        {
+            body = response.Body ?? Array.Empty<byte>();
+        }
 
         var sb = new StringBuilder();
         sb.Append("HTTP/1.1 ");
