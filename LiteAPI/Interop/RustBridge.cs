@@ -1,5 +1,5 @@
+using System.Buffers;
 using System.Runtime.InteropServices;
-using System.Text;
 
 internal static class RustBridge
 {
@@ -22,19 +22,23 @@ internal static class RustBridge
     // Keep delegates alive for the duration of the listener.
     private static HandleRequestV2Delegate? _handle;
     private static FreeBytesDelegate? _free;
+    private static int _started;  // 0 = idle, 1 = running
 
     public static unsafe void StartRustListener(LiteWebApplication app, LiteServerOptions options)
     {
+        if (Interlocked.Exchange(ref _started, 1) == 1)
+            throw new InvalidOperationException("StartRustListener can only be called once per process.");
+
         // Pass limits to the Rust listener without changing the native ABI.
         Environment.SetEnvironmentVariable(
             "LITEAPI_RUST_MAX_CONCURRENT",
-            options.MaxConcurrentRequests.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            options.MaxConcurrentRequests.ToString(CultureInfo.InvariantCulture));
 
         if (options.MaxRequestBodyBytes is long maxBody && maxBody > 0)
         {
             Environment.SetEnvironmentVariable(
                 "LITEAPI_RUST_MAX_BODY_BYTES",
-                maxBody.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                maxBody.ToString(CultureInfo.InvariantCulture));
         }
 
         _handle = Handle;
@@ -49,19 +53,22 @@ internal static class RustBridge
         {
             responseLen = 0;
 
-            var method = Marshal.PtrToStringAnsi(methodPtr) ?? "GET";
-            var rawPath = Marshal.PtrToStringAnsi(pathPtr) ?? "/";
-            var headersText = Marshal.PtrToStringAnsi(headersPtr) ?? string.Empty;
-            var remoteIp = Marshal.PtrToStringAnsi(remoteIpPtr);
+            // UTF-8 decode preserves non-ASCII paths/headers; PtrToStringAnsi
+            // silently corrupts anything outside 0x00-0x7F.
+            var method = PtrToUtf8(methodPtr) ?? "GET";
+            var rawPath = PtrToUtf8(pathPtr) ?? "/";
+            var headersText = PtrToUtf8(headersPtr) ?? string.Empty;
+            var remoteIp = PtrToUtf8(remoteIpPtr);
 
             var (path, query) = SplitPathAndQuery(rawPath);
             var headers = ParseHeaders(headersText);
 
             var contentType = headers.TryGetValue("Content-Type", out var ct) ? ct : null;
 
-            var body = new byte[(int)bodyLen];
-            if (bodyLen > 0)
-                Marshal.Copy((IntPtr)bodyPtr, body, 0, (int)bodyLen);
+            var bodyLenInt = checked((int)bodyLen);
+            var body = bodyLenInt == 0 ? Array.Empty<byte>() : new byte[bodyLenInt];
+            if (bodyLenInt > 0)
+                Marshal.Copy((IntPtr)bodyPtr, body, 0, bodyLenInt);
 
             var req = new LiteAPI.Http.LiteRequest(
                 method,
@@ -90,7 +97,12 @@ internal static class RustBridge
                 response = Response.InternalServerError(ex.Message);
             }
 
+            // Snapshot headers so the framework's auto-added Content-Length /
+            // Connection don't mutate user-visible state from a middleware.
             var bytes = BuildHttpResponseBytes(method, response, ctx.ResponseHeaders);
+
+            // Hand back HGlobal-allocated memory; the matching Free runs after
+            // Rust copies it into its own buffer.
             var ptr = Marshal.AllocHGlobal(bytes.Length);
             Marshal.Copy(bytes, 0, ptr, bytes.Length);
             responseLen = (nuint)bytes.Length;
@@ -104,23 +116,45 @@ internal static class RustBridge
         }
     }
 
+    private static unsafe string? PtrToUtf8(IntPtr ptr)
+    {
+        if (ptr == IntPtr.Zero) return null;
+        return Marshal.PtrToStringUTF8(ptr);
+    }
+
     private static Dictionary<string, string> ParseHeaders(string headersText)
     {
         var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (headersText.Length == 0) return dict;
 
-        foreach (var line in headersText.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        var span = headersText.AsSpan();
+        while (span.Length > 0)
         {
-            var trimmed = line.TrimEnd('\r');
-            var idx = trimmed.IndexOf(':');
-            if (idx <= 0)
-                continue;
+            int nl = span.IndexOf('\n');
+            ReadOnlySpan<char> line;
+            if (nl < 0)
+            {
+                line = span;
+                span = ReadOnlySpan<char>.Empty;
+            }
+            else
+            {
+                line = span[..nl];
+                span = span[(nl + 1)..];
+            }
 
-            var name = trimmed[..idx].Trim();
-            var value = trimmed[(idx + 1)..].Trim();
-            if (name.Length == 0)
-                continue;
+            // Strip trailing CR.
+            if (line.Length > 0 && line[^1] == '\r') line = line[..^1];
+            if (line.Length == 0) continue;
 
-            dict[name] = value;
+            int colon = line.IndexOf(':');
+            if (colon <= 0) continue;
+
+            var name = line[..colon].Trim();
+            var value = line[(colon + 1)..].Trim();
+            if (name.Length == 0) continue;
+
+            dict[name.ToString()] = value.ToString();
         }
 
         return dict;
@@ -135,8 +169,8 @@ internal static class RustBridge
 
         var pathOnly = rawPath[..qIndex];
         var q = rawPath[(qIndex + 1)..];
-        var parsed = System.Web.HttpUtility.ParseQueryString(q);
-        foreach (string key in parsed.AllKeys!)
+        var parsed = HttpUtility.ParseQueryString(q);
+        foreach (string? key in parsed.AllKeys!)
         {
             if (key != null)
                 query[key] = parsed[key]!;
@@ -145,13 +179,16 @@ internal static class RustBridge
         return (pathOnly, query);
     }
 
+    /// <summary>
+    /// Builds the wire bytes for the response. Headers are constructed without
+    /// allocating a temporary string for the StringBuilder, and the auto-added
+    /// Content-Length / Connection are written separately so the user's
+    /// <see cref="LiteHttpContext.ResponseHeaders"/> dictionary is not mutated.
+    /// </summary>
     private static byte[] BuildHttpResponseBytes(string method, Response response, Dictionary<string, string> responseHeaders)
     {
         var isHead = string.Equals(method, "HEAD", StringComparison.OrdinalIgnoreCase);
 
-        // Streaming responses are materialised here because the Rust ABI returns
-        // a single contiguous buffer. True chunked transfer over the Rust path
-        // is a separate refactor.
         byte[] body;
         if (isHead)
         {
@@ -159,6 +196,8 @@ internal static class RustBridge
         }
         else if (response.IsStreaming)
         {
+            // Rust ABI returns a single contiguous buffer; materialise the
+            // stream into one. The managed host streams properly.
             using var ms = new MemoryStream();
             response.StreamWriter!(ms, CancellationToken.None).GetAwaiter().GetResult();
             body = ms.ToArray();
@@ -168,39 +207,68 @@ internal static class RustBridge
             body = response.Body ?? Array.Empty<byte>();
         }
 
-        var sb = new StringBuilder();
-        sb.Append("HTTP/1.1 ");
-        sb.Append(response.StatusCode);
-        sb.Append(' ');
-        sb.Append(GetReasonPhrase(response.StatusCode));
-        sb.Append("\r\n");
+        var writer = new ArrayBufferWriter<byte>(initialCapacity: 256 + body.Length);
 
-        // Ensure Content-Type/Length are present.
-        var hasContentType = responseHeaders.ContainsKey("Content-Type");
-        if (!hasContentType && !string.IsNullOrWhiteSpace(response.ContentType))
-            responseHeaders["Content-Type"] = response.ContentType;
+        // Status line.
+        WriteAscii(writer, "HTTP/1.1 ");
+        WriteAscii(writer, response.StatusCode.ToString(CultureInfo.InvariantCulture));
+        WriteAscii(writer, " ");
+        WriteAscii(writer, GetReasonPhrase(response.StatusCode));
+        WriteAscii(writer, "\r\n");
 
-        responseHeaders["Content-Length"] = body.Length.ToString();
-        responseHeaders["Connection"] = "close";
-
+        // User-supplied headers.
+        var hasContentType = false;
+        var hasContentLength = false;
+        var hasConnection = false;
         foreach (var h in responseHeaders)
         {
-            sb.Append(h.Key);
-            sb.Append(": ");
-            sb.Append(h.Value);
-            sb.Append("\r\n");
+            if (string.Equals(h.Key, "Content-Type", StringComparison.OrdinalIgnoreCase)) hasContentType = true;
+            else if (string.Equals(h.Key, "Content-Length", StringComparison.OrdinalIgnoreCase)) { hasContentLength = true; continue; }
+            else if (string.Equals(h.Key, "Connection", StringComparison.OrdinalIgnoreCase)) hasConnection = true;
+            WriteHeader(writer, h.Key, h.Value);
         }
 
-        sb.Append("\r\n");
-        var headerBytes = Encoding.ASCII.GetBytes(sb.ToString());
+        // Auto-add Content-Type when the user didn't set one.
+        if (!hasContentType && !string.IsNullOrWhiteSpace(response.ContentType))
+            WriteHeader(writer, "Content-Type", response.ContentType);
 
-        if (body.Length == 0)
-            return headerBytes;
+        // Always overwrite Content-Length and Connection with framework values.
+        _ = hasContentLength;
+        WriteHeader(writer, "Content-Length", body.Length.ToString(CultureInfo.InvariantCulture));
+        if (!hasConnection)
+            WriteHeader(writer, "Connection", "close");
 
-        var result = new byte[headerBytes.Length + body.Length];
-        Buffer.BlockCopy(headerBytes, 0, result, 0, headerBytes.Length);
-        Buffer.BlockCopy(body, 0, result, headerBytes.Length, body.Length);
-        return result;
+        WriteAscii(writer, "\r\n");
+
+        if (body.Length > 0)
+        {
+            writer.Write(body);
+        }
+
+        return writer.WrittenSpan.ToArray();
+    }
+
+    private static void WriteHeader(IBufferWriter<byte> writer, string name, string value)
+    {
+        WriteAscii(writer, name);
+        WriteAscii(writer, ": ");
+        // Header values are written as UTF-8 to tolerate non-ASCII characters
+        // (e.g. Uzbek strings in custom headers). Most HTTP/1.1 clients treat
+        // header bytes as Latin-1; UTF-8 is a strict superset for the common
+        // ASCII case and round-trips correctly when both ends decode UTF-8.
+        var byteCount = Encoding.UTF8.GetByteCount(value);
+        var span = writer.GetSpan(byteCount);
+        var written = Encoding.UTF8.GetBytes(value, span);
+        writer.Advance(written);
+        WriteAscii(writer, "\r\n");
+    }
+
+    private static void WriteAscii(IBufferWriter<byte> writer, string ascii)
+    {
+        var span = writer.GetSpan(ascii.Length);
+        for (int i = 0; i < ascii.Length; i++)
+            span[i] = (byte)ascii[i];
+        writer.Advance(ascii.Length);
     }
 
     private static string GetReasonPhrase(int statusCode) => statusCode switch
@@ -209,14 +277,21 @@ internal static class RustBridge
         201 => "Created",
         202 => "Accepted",
         204 => "No Content",
+        301 => "Moved Permanently",
+        302 => "Found",
+        304 => "Not Modified",
         400 => "Bad Request",
         401 => "Unauthorized",
         403 => "Forbidden",
         404 => "Not Found",
+        405 => "Method Not Allowed",
         409 => "Conflict",
         413 => "Payload Too Large",
         429 => "Too Many Requests",
+        431 => "Request Header Fields Too Large",
         500 => "Internal Server Error",
-        _ => "OK"
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        _   => "OK"
     };
 }
