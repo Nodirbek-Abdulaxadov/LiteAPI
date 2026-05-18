@@ -1,4 +1,4 @@
-﻿/// <summary>
+/// <summary>
 /// LiteWebApplication: signature-based routing with delegate support and auth.
 /// </summary>
 public class LiteWebApplication(
@@ -10,6 +10,7 @@ public class LiteWebApplication(
 {
     private readonly HttpListener _listener = new();
     private readonly List<LiteMiddleware> _middlewares = [];
+    private readonly CancellationTokenSource _shutdownCts = new();
 
     public Router Router => router;
     public ServiceCollection Services => services;
@@ -37,13 +38,20 @@ public class LiteWebApplication(
 
     public void Use(LiteMiddleware middleware) => _middlewares.Add(middleware);
 
-    /// <summary>
-    /// Use a middleware class implementing ILiteMiddleware.
-    /// </summary>
+    /// <summary>Use a middleware class implementing ILiteMiddleware.</summary>
     public void Use<T>() where T : ILiteMiddleware, new()
     {
         var instance = new T();
         _middlewares.Add(instance.InvokeAsync);
+    }
+
+    /// <summary>
+    /// Signals every <c>Run*</c> loop to stop accepting new requests and let
+    /// in-flight requests finish. Safe to call from a signal handler.
+    /// </summary>
+    public void StopAsync()
+    {
+        try { _shutdownCts.Cancel(); } catch { }
     }
 
     public void Run() => Run(new LiteServerOptions());
@@ -70,85 +78,152 @@ public class LiteWebApplication(
 
     public void Run(LiteServerOptions options)
     {
-        if (options is null)
-            throw new ArgumentNullException(nameof(options));
-
+        ArgumentNullException.ThrowIfNull(options);
         if (options.MaxConcurrentRequests <= 0)
             throw new ArgumentOutOfRangeException(nameof(options.MaxConcurrentRequests), "Must be > 0.");
 
+        RunAsync(options).GetAwaiter().GetResult();
+    }
+
+    public async Task RunAsync(LiteServerOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        options ??= new LiteServerOptions();
         using var concurrency = new SemaphoreSlim(options.MaxConcurrentRequests, options.MaxConcurrentRequests);
 
         foreach (var url in urls)
             _listener.Prefixes.Add(url.EndsWith('/') ? url : url + "/");
 
         _listener.Start();
-        Console.WriteLine($"LiteAPI.cs running on: {string.Join(", ", urls)}");
+        Console.WriteLine($"LiteAPI listening on: {string.Join(", ", urls)}");
 
-        while (true)
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdownCts.Token);
+        Console.CancelKeyPress += (_, e) =>
         {
-            var context = _listener.GetContext();
-            context.Request.SetServices(services);
+            e.Cancel = true;
+            try { _shutdownCts.Cancel(); } catch { }
+        };
 
-            // Backpressure: do not queue infinite tasks under load.
-            concurrency.Wait();
+        var inFlight = new List<Task>();
 
-            _ = Task.Run(async () =>
+        try
+        {
+            while (!linkedCts.IsCancellationRequested)
             {
+                HttpListenerContext context;
                 try
                 {
-                    var request = context.Request;
+                    context = await _listener.GetContextAsync().WaitAsync(linkedCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) { break; }
+                catch (HttpListenerException) { break; }
 
-                    if (options.MaxRequestBodyBytes is long maxBytes
-                        && request.ContentLength64 > 0
-                        && request.ContentLength64 > maxBytes)
+                context.Request.SetServices(services);
+
+                try
+                {
+                    await concurrency.WaitAsync(linkedCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    SafeClose(context);
+                    break;
+                }
+
+                var task = Task.Run(async () =>
+                {
+                    try
                     {
-                        var tooLarge = Response.PayloadTooLarge($"Request body exceeds limit ({maxBytes} bytes).");
-                        context.Response.StatusCode = tooLarge.StatusCode;
-                        context.Response.ContentType = tooLarge.ContentType;
-                        context.Response.ContentLength64 = tooLarge.Body.Length;
-                        context.Response.OutputStream.Write(tooLarge.Body, 0, tooLarge.Body.Length);
-                        return;
+                        await HandleContextAsync(context, options);
                     }
+                    finally
+                    {
+                        concurrency.Release();
+                    }
+                });
 
-                    var method = request.HttpMethod.ToUpperInvariant();
-                    var path = request.Url!.AbsolutePath;
+                lock (inFlight) inFlight.Add(task);
+                _ = task.ContinueWith(t => { lock (inFlight) inFlight.Remove(t); }, TaskScheduler.Default);
+            }
+        }
+        finally
+        {
+            Task[] pending;
+            lock (inFlight) pending = [.. inFlight];
 
-                    router.TryResolve(method, path, out var matchedRoute, out var routeParams);
+            try { await Task.WhenAll(pending).WaitAsync(TimeSpan.FromSeconds(10)); }
+            catch { /* drain timeout — proceed with close */ }
 
-                    var liteContext = context.GetContext(routeParams);
-                    liteContext.RouteMetadata = matchedRoute?.Metadata ?? new RouteMetadata { AllowAnonymous = true };
-
-                    var response = await ProcessRequestAsync(liteContext, matchedRoute, routeParams, options);
-
-                    context.Response.StatusCode = response.StatusCode;
-                    context.Response.ContentType = response.ContentType;
-
-                    // Copy any response headers written by middlewares/features
-                    foreach (var header in liteContext.ResponseHeaders)
-                        context.Response.Headers[header.Key] = header.Value;
-
-                    context.Response.ContentLength64 = response.Body.Length;
-                    context.Response.OutputStream.Write(response.Body, 0, response.Body.Length);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error: {ex}");
-                    context.Response.StatusCode = 500;
-                }
-                finally
-                {
-                    context.Response.OutputStream.Close();
-                    concurrency.Release();
-                }
-            });
+            try { _listener.Stop(); } catch { }
+            try { _listener.Close(); } catch { }
         }
     }
 
-    public void RunWithRust()
+    private async Task HandleContextAsync(HttpListenerContext context, LiteServerOptions options)
     {
-        Console.WriteLine("Running LiteAPI using embedded Rust TCP listener...");
-        RunWithRust(new LiteServerOptions());
+        try
+        {
+            var request = context.Request;
+
+            if (options.MaxRequestBodyBytes is long maxBytes
+                && request.ContentLength64 > 0
+                && request.ContentLength64 > maxBytes)
+            {
+                var tooLarge = Response.PayloadTooLarge($"Request body exceeds limit ({maxBytes} bytes).");
+                await WriteResponseAsync(context.Response, tooLarge);
+                return;
+            }
+
+            var method = request.HttpMethod.ToUpperInvariant();
+            var path = request.Url!.AbsolutePath;
+
+            router.TryResolve(method, path, out var matchedRoute, out var routeParams);
+
+            var liteContext = context.GetContext(routeParams);
+            liteContext.RouteMetadata = matchedRoute?.Metadata ?? new RouteMetadata { AllowAnonymous = true };
+
+            var response = await ProcessRequestAsync(liteContext, matchedRoute, routeParams, options);
+
+            context.Response.StatusCode = response.StatusCode;
+            context.Response.ContentType = response.ContentType;
+
+            foreach (var header in liteContext.ResponseHeaders)
+            {
+                // ContentType/Length are properties on HttpListenerResponse;
+                // setting via Headers collection is rejected at runtime.
+                if (string.Equals(header.Key, "Content-Type", StringComparison.OrdinalIgnoreCase)) continue;
+                if (string.Equals(header.Key, "Content-Length", StringComparison.OrdinalIgnoreCase)) continue;
+                context.Response.Headers[header.Key] = header.Value;
+            }
+
+            context.Response.ContentLength64 = response.Body.Length;
+            await context.Response.OutputStream.WriteAsync(response.Body).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error: {ex}");
+            try { context.Response.StatusCode = 500; } catch { }
+        }
+        finally
+        {
+            SafeClose(context);
+        }
     }
+
+    private static async Task WriteResponseAsync(HttpListenerResponse rawResponse, Response response)
+    {
+        rawResponse.StatusCode = response.StatusCode;
+        rawResponse.ContentType = response.ContentType;
+        rawResponse.ContentLength64 = response.Body.Length;
+        if (response.Body.Length > 0)
+            await rawResponse.OutputStream.WriteAsync(response.Body).ConfigureAwait(false);
+    }
+
+    private static void SafeClose(HttpListenerContext context)
+    {
+        try { context.Response.OutputStream.Close(); } catch { }
+    }
+
+    public void RunWithRust() => RunWithRust(new LiteServerOptions());
 
     public void RunWithRust(LiteServerOptions options)
     {

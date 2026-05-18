@@ -1,4 +1,4 @@
-﻿/// <summary>
+/// <summary>
 /// Extension methods for LiteWebApplication, including route grouping and static file serving.
 /// </summary>
 public static class LiteWebApplicationExtensions
@@ -21,36 +21,37 @@ public static class LiteWebApplicationExtensions
     }
 
     /// <summary>
-    /// Enables zero-dependency static file serving from the specified root folder (default: wwwroot).
-    /// Uses "/{*path}" fallback routing to catch and serve unregistered file routes.
+    /// Enables zero-dependency static file serving from the specified root folder
+    /// (default <c>wwwroot</c>). Uses a low-priority <c>"/{*path}"</c> fallback
+    /// so any explicit route the application has already registered wins.
+    /// Large files are streamed straight from disk to the response — no full
+    /// allocation into memory.
     /// </summary>
     public static void MapStaticFiles(this LiteWebApplication app, string root = "wwwroot")
     {
-        app.Get("/{*path}", (LiteAPI.Http.LiteRequest request) =>
+        // TryHandle skips registration if the user already owns "/{*path}".
+        var registered = app.Router.TryHandle("GET", "/{*path}", async (LiteAPI.Http.LiteRequest request) =>
         {
-            var requestedPath = request.Path.Trim('/');
-
-            requestedPath = Uri.UnescapeDataString(requestedPath);
-
-            // Serve index.html for "/"
+            var requestedPath = Uri.UnescapeDataString(request.Path.Trim('/'));
             if (string.IsNullOrEmpty(requestedPath))
                 requestedPath = "index.html";
 
-            return ServeStaticFile(root, requestedPath);
+            return await ServeStaticFileAsync(root, requestedPath);
         });
+
+        if (registered is null)
+            Console.WriteLine("MapStaticFiles: '/{*path}' is already registered — static-file fallback skipped.");
     }
 
-    /// <summary>
-    /// Reads a file from disk and returns it as a Response with correct Content-Type.
-    /// Returns 404 if the file does not exist.
-    /// </summary>
-    private static Response ServeStaticFile(string root, string requestedPath)
+    private static async Task<Response> ServeStaticFileAsync(string root, string requestedPath)
     {
         var rootFullPath = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), root));
         var safeRelativePath = requestedPath.Replace('/', Path.DirectorySeparatorChar);
         var candidateFullPath = Path.GetFullPath(Path.Combine(rootFullPath, safeRelativePath));
 
-        if (!candidateFullPath.StartsWith(rootFullPath, StringComparison.OrdinalIgnoreCase))
+        // Reject path traversal: candidate must live under the configured root.
+        if (!candidateFullPath.StartsWith(rootFullPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(candidateFullPath, rootFullPath, StringComparison.OrdinalIgnoreCase))
             return Response.NotFound();
 
         if (!File.Exists(candidateFullPath))
@@ -58,25 +59,28 @@ public static class LiteWebApplicationExtensions
 
         var contentType = Path.GetExtension(candidateFullPath).ToLowerInvariant() switch
         {
-            ".html" => "text/html",
-            ".css" => "text/css",
-            ".js" => "application/javascript",
-            ".json" => "application/json",
-            ".png" => "image/png",
-            ".jpg" => "image/jpeg",
-            ".jpeg" => "image/jpeg",
-            ".svg" => "image/svg+xml",
-            ".ico" => "image/x-icon",
-            _ => "application/octet-stream"
+            ".html" or ".htm" => "text/html; charset=utf-8",
+            ".css"            => "text/css; charset=utf-8",
+            ".js" or ".mjs"   => "application/javascript; charset=utf-8",
+            ".json"           => "application/json; charset=utf-8",
+            ".png"            => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif"            => "image/gif",
+            ".webp"           => "image/webp",
+            ".svg"            => "image/svg+xml",
+            ".ico"            => "image/x-icon",
+            ".txt"            => "text/plain; charset=utf-8",
+            ".pdf"            => "application/pdf",
+            ".woff"           => "font/woff",
+            ".woff2"          => "font/woff2",
+            ".wasm"           => "application/wasm",
+            _                 => "application/octet-stream"
         };
 
-        var fileBytes = File.ReadAllBytes(candidateFullPath);
-
-        return new Response
-        {
-            StatusCode = 200,
-            ContentType = contentType,
-            Body = fileBytes
-        };
+        // Stream straight off disk — avoids a synchronous full-file allocation.
+        await using var fs = new FileStream(candidateFullPath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 81920, useAsync: true);
+        using var ms = new MemoryStream();
+        await fs.CopyToAsync(ms);
+        return Response.Bytes(ms.ToArray(), contentType);
     }
 }
