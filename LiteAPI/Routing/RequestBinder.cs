@@ -35,58 +35,70 @@ public static class RequestBinder
         }
     }
 
+    /// <summary>
+    /// Legacy entry point that returns only the text fields. New code should
+    /// use <see cref="LiteAPI.Http.MultipartReader.Parse(Stream, string)"/> to
+    /// get full <see cref="LiteAPI.Http.MultipartPart"/>s (file uploads, headers, binary data).
+    /// </summary>
     public static Dictionary<string, string> ParseMultipartFormData(Stream stream, string contentType)
     {
+        var parts = LiteAPI.Http.MultipartReader.Parse(stream, contentType);
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        var boundaryToken = "boundary=";
-        var idx = contentType.IndexOf(boundaryToken, StringComparison.OrdinalIgnoreCase);
-        if (idx < 0) return result;
-
-        var boundary = "--" + contentType[(idx + boundaryToken.Length)..].Trim().Trim('"');
-
-        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
-        string? line;
-        string? currentField = null;
-        var currentValue = new StringBuilder();
-
-        while ((line = reader.ReadLine()) != null)
+        foreach (var p in parts)
         {
-            if (line.StartsWith(boundary, StringComparison.Ordinal))
-            {
-                if (currentField != null)
-                {
-                    result[currentField] = currentValue.ToString().TrimEnd('\r', '\n');
-                    currentField = null;
-                    currentValue.Clear();
-                }
-            }
-            else if (line.StartsWith("Content-Disposition", StringComparison.OrdinalIgnoreCase))
-            {
-                var nameIndex = line.IndexOf("name=\"", StringComparison.OrdinalIgnoreCase);
-                if (nameIndex >= 0)
-                {
-                    nameIndex += 6;
-                    var endIndex = line.IndexOf('"', nameIndex);
-                    if (endIndex > nameIndex)
-                        currentField = line[nameIndex..endIndex];
-                }
-                // Skip the blank line that separates the part header from the body.
-                reader.ReadLine();
-            }
-            else if (currentField != null)
-            {
-                currentValue.AppendLine(line);
-            }
+            if (p.IsFile) continue;
+            result[p.Name] = p.AsString();
         }
-
         return result;
     }
 
+    /// <summary>
+    /// Bind a <c>multipart/form-data</c> body to <paramref name="type"/>.
+    /// Properties typed as <see cref="LiteAPI.Http.MultipartPart"/>, <c>byte[]</c>,
+    /// or <c>List&lt;MultipartPart&gt;</c> receive the uploaded files; all
+    /// other properties bind from text fields (with full type conversion).
+    /// </summary>
     public static object BindMultipart(this Stream stream, string contentType, Type type)
     {
         var obj = Activator.CreateInstance(type)!;
-        BindProperties(obj, ParseMultipartFormData(stream, contentType));
+        var parts = LiteAPI.Http.MultipartReader.Parse(stream, contentType);
+
+        var textFields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var filesByName = new Dictionary<string, List<LiteAPI.Http.MultipartPart>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in parts)
+        {
+            if (p.IsFile)
+            {
+                if (!filesByName.TryGetValue(p.Name, out var list))
+                {
+                    list = new List<LiteAPI.Http.MultipartPart>();
+                    filesByName[p.Name] = list;
+                }
+                list.Add(p);
+            }
+            else
+            {
+                textFields[p.Name] = p.AsString();
+            }
+        }
+
+        BindProperties(obj, textFields);
+
+        foreach (var prop in type.GetProperties())
+        {
+            if (!prop.CanWrite) continue;
+            if (!filesByName.TryGetValue(prop.Name, out var files) || files.Count == 0) continue;
+
+            if (prop.PropertyType == typeof(LiteAPI.Http.MultipartPart))
+                prop.SetValue(obj, files[0]);
+            else if (prop.PropertyType == typeof(byte[]))
+                prop.SetValue(obj, files[0].Data);
+            else if (prop.PropertyType == typeof(List<LiteAPI.Http.MultipartPart>))
+                prop.SetValue(obj, files);
+            else if (prop.PropertyType == typeof(IReadOnlyList<LiteAPI.Http.MultipartPart>))
+                prop.SetValue(obj, files);
+        }
+
         return obj;
     }
 

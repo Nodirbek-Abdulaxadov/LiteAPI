@@ -1,5 +1,48 @@
 # Changelog
 
+## [2.1.0] — Unreleased
+
+Adds the major roadmap features in a single release: streaming responses, a real multipart parser with file uploads, opt-in response caching, and DataAnnotations validation. All built on the 2.0 architecture; no breaking changes to the buffered request/response surface.
+
+### Added — Streaming responses
+
+`Response` now exposes a `StreamWriter` slot alongside the existing `Body`. When set, the host (`HttpListener` managed mode) flushes incremental writes through to the underlying network stream with `SendChunked = true`. New helpers:
+
+- `Response.Stream(Func<Stream, CancellationToken, Task> writer, string contentType)` — bring-your-own writer.
+- `Response.File(string path)` — streams a disk file with extension-inferred content type; returns 404 if missing.
+- `Response.Sse(IAsyncEnumerable<string> events)` — Server-Sent Events helper, one `data:` frame per yielded string.
+
+The Rust hosting path materialises streamed bodies into a single buffer before crossing the FFI (true chunked transfer over the Rust listener is a follow-up).
+
+### Added — Real multipart parser
+
+`LiteAPI.Http.MultipartReader` is a new RFC 7578-aligned parser:
+- Byte-level boundary scanning; binary data (zero bytes, embedded CRLFs) passes through intact.
+- Returns `IReadOnlyList<MultipartPart>` with name, filename, per-part content type, headers, and the raw body bytes.
+- Tolerates quoted boundaries and trailing parameters on the `Content-Type` header.
+
+`RequestBinder.BindMultipart` now backs onto the new reader. Properties typed as `MultipartPart`, `byte[]`, `List<MultipartPart>`, or `IReadOnlyList<MultipartPart>` receive the uploaded files; everything else still binds from text fields with full type conversion.
+
+The previous text-only, line-oriented `ParseMultipartFormData` stays as a back-compat wrapper that drops file parts.
+
+### Added — Response caching middleware
+
+`app.UseResponseCaching(o => …)`:
+- Caches successful (`200`) `GET` / `HEAD` responses by `method | path | query | vary-by headers`.
+- Configurable `TtlSeconds`, `IncludeQueryString`, `VaryByHeaders`, `MaxCachedBodyBytes`.
+- Honours `Cache-Control: no-store` on the request.
+- Adds `X-Cache: HIT|MISS` on the response.
+- Pluggable backing store via `IResponseCacheStore`; default `InMemoryResponseCacheStore` does lazy TTL eviction with no background timer.
+- Streaming responses are never cached.
+
+### Added — DataAnnotations validation
+
+`builder.AddValidation(o => …)` plus the new `[SkipValidation]` attribute. After model binding completes, the router runs `Validator.TryValidateObject(…)` on every bound complex argument and, on failure, returns a `400` response with either RFC 7807 `application/problem+json` or a flat `{ errors: [...] }` shape (selectable via `ResponseShape`). Users can fully override the body with `ValidationOptions.CustomResponse`.
+
+### Tests
+
+- Test count: **27 → 49** (`StreamingResponseTests`, `MultipartReaderTests`, `ResponseCachingTests`, `ValidationTests`).
+
 ## [2.0.0] — Unreleased
 
 Correctness, performance, and lifecycle improvements. Multi-targets `net8.0` and `net9.0`.

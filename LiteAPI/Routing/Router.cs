@@ -258,6 +258,33 @@ public class Router
             }
         }
 
+        // DataAnnotations validation runs on every bound complex argument
+        // unless the handler is decorated with [SkipValidation] or validation
+        // has been globally disabled via AddValidation(opt => opt.Enabled = false).
+        if (ValidationPipeline.IsEnabled
+            && routeDefinition.Handler.Method.GetCustomAttribute<SkipValidationAttribute>() is null)
+        {
+            List<ValidationFailure>? aggregated = null;
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                var value = args[i];
+                if (value is null) continue;
+                if (!IsComplexBindable(parameters[i].ParameterType)) continue;
+
+                if (!ModelValidator.TryValidate(value, out var failures))
+                {
+                    aggregated ??= new List<ValidationFailure>();
+                    aggregated.AddRange(failures);
+                }
+            }
+
+            if (aggregated is { Count: > 0 })
+            {
+                var failureResponse = ValidationPipeline.BuildFailureResponse(aggregated);
+                if (failureResponse is not null) return failureResponse;
+            }
+        }
+
         try
         {
             var result = routeDefinition.Invoker(args);
@@ -276,6 +303,12 @@ public class Router
             return Response.InternalServerError(ex.InnerException?.Message ?? ex.Message);
         }
     }
+
+    private static bool IsComplexBindable(Type t)
+        => t.IsClass
+        && t != typeof(string)
+        && t != typeof(HttpListenerRequest)
+        && t != typeof(LiteAPI.Http.LiteRequest);
 
     private static async Task<Response> AwaitNonResponseTask(Task task)
     {

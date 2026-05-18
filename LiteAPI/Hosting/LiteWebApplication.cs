@@ -195,8 +195,17 @@ public class LiteWebApplication(
                 context.Response.Headers[header.Key] = header.Value;
             }
 
-            context.Response.ContentLength64 = response.Body.Length;
-            await context.Response.OutputStream.WriteAsync(response.Body).ConfigureAwait(false);
+            if (response.IsStreaming)
+            {
+                // Streaming: no Content-Length; flush incremental writes.
+                context.Response.SendChunked = true;
+                await response.StreamWriter!(context.Response.OutputStream, CancellationToken.None).ConfigureAwait(false);
+            }
+            else
+            {
+                context.Response.ContentLength64 = response.Body.Length;
+                await context.Response.OutputStream.WriteAsync(response.Body).ConfigureAwait(false);
+            }
         }
         catch (Exception ex)
         {
